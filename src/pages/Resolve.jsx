@@ -282,8 +282,8 @@ const Resolve = () => {
     URL.revokeObjectURL(url);
   };
 
-  // ─── Push to Database ──────────────────────────────────────────
-  const handlePushToDb = async () => {
+  // ─── Save to SQL Server (primary) ──────────────────────────────
+  const handleSaveToSqlServer = async () => {
     if (bulkResults.length === 0) return;
     setPushing(true);
     try {
@@ -307,18 +307,39 @@ const Resolve = () => {
       if (res.ok) {
         const data = await res.json();
         toast.success(
-          `Pushed ${data.totalProcessed} records: ${data.mappingsCreated} mappings created, ${data.mappingsUpdated} updated, ${data.mastersCreated} masters created, ${data.mastersUpdated} updated`
+          `Saved to SQL Server: ${data.mappingsCreated} created, ${data.mappingsUpdated} updated, ${data.mastersCreated} masters created`
         );
-        if (data.errors?.length > 0) {
-          data.errors.forEach((e) => toast.error(e));
-        }
+        if (data.errors?.length > 0) data.errors.forEach((e) => toast.error(e));
       } else {
-        toast.error('Failed to push to database');
+        toast.error('Failed to save to SQL Server');
       }
     } catch (err) {
       toast.error(err.message || 'Push failed');
     } finally {
       setPushing(false);
+    }
+  };
+
+  // ─── Push SQL Server → Postgres ────────────────────────────────
+  const [pushingPg, setPushingPg] = useState(false);
+
+  const handlePushToPostgres = async () => {
+    setPushingPg(true);
+    try {
+      const res = await fetch('/api/v1/push-to-postgres', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(
+          `Pushed to Postgres: ${data.mastersCreated} masters created, ${data.mastersUpdated} updated, ${data.mappingsCreated} mappings created, ${data.mappingsUpdated} updated`
+        );
+        if (data.errors?.length > 0) data.errors.forEach((e) => toast.error(e));
+      } else {
+        toast.error('Failed to push to Postgres');
+      }
+    } catch (err) {
+      toast.error(err.message || 'Push to Postgres failed');
+    } finally {
+      setPushingPg(false);
     }
   };
 
@@ -640,10 +661,15 @@ const Resolve = () => {
                 <Chip icon={<Pencil size={14} />} label={`${needsAttentionCount} needs attention`} color="warning" variant="outlined" size="small" />
                 <Box sx={{ flexGrow: 1 }} />
                 <Button size="small" variant="outlined" startIcon={<Download size={14} />} onClick={handleExportResults}>Export CSV</Button>
-                <Button size="small" variant="contained" color="success" disabled={pushing}
-                  startIcon={pushing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                  onClick={handlePushToDb}>
-                  {pushing ? 'Pushing...' : 'Push to Database'}
+                <Button size="small" variant="contained" color="primary" disabled={pushing}
+                  startIcon={pushing ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  onClick={handleSaveToSqlServer}>
+                  {pushing ? 'Saving...' : 'Save to SQL Server'}
+                </Button>
+                <Button size="small" variant="contained" color="success" disabled={pushingPg}
+                  startIcon={pushingPg ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  onClick={handlePushToPostgres}>
+                  {pushingPg ? 'Pushing...' : 'Push to Postgres'}
                 </Button>
               </Stack>
             )}

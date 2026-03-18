@@ -4,25 +4,18 @@ using Microsoft.EntityFrameworkCore;
 namespace InvestorDataApi.Data;
 
 /// <summary>
-/// PostgreSQL database — read-only source data (bilateral_asset_level)
-/// and push target for CustomerAliasMapping/CustomerMaster (maintained by external team).
+/// Primary database (SQL Server) — owns CustomerAliasMapping and CustomerMaster.
+/// All CRUD and resolve operations go through this context.
 /// </summary>
-public class PostgresDbContext : DbContext
+public class SqlServerDbContext : DbContext
 {
-    public PostgresDbContext(DbContextOptions<PostgresDbContext> options) : base(options) { }
+    public SqlServerDbContext(DbContextOptions<SqlServerDbContext> options) : base(options) { }
 
-    public DbSet<BilateralAsset> BilateralAssets => Set<BilateralAsset>();
     public DbSet<CustomerAliasMapping> CustomerAliasMappings => Set<CustomerAliasMapping>();
     public DbSet<CustomerMaster> CustomerMasters => Set<CustomerMaster>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<BilateralAsset>(entity =>
-        {
-            entity.ToTable("bilateral_asset_level");
-            entity.HasKey(e => e.Id);
-        });
-
         modelBuilder.Entity<CustomerMaster>(entity =>
         {
             entity.ToTable("CustomerMaster", "InvestorAlias");
@@ -33,6 +26,10 @@ public class PostgresDbContext : DbContext
         {
             entity.ToTable("CustomerAliasMapping", "InvestorAlias");
             entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.OriginalCustomerName);
+            entity.HasIndex(e => e.CleanedCustomerName);
+            entity.HasIndex(e => e.CanonicalCustomerId);
+
             entity.HasOne(e => e.CustomerMaster)
                 .WithMany(m => m.AliasMappings)
                 .HasForeignKey(e => e.CanonicalCustomerId)

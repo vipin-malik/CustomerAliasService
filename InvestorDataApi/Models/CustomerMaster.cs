@@ -7,6 +7,7 @@ namespace InvestorDataApi.Models;
 public class CustomerMaster
 {
     [Key]
+    [DatabaseGenerated(DatabaseGeneratedOption.None)]
     [Column("CanonicalCustomerId")]
     public int CanonicalCustomerId { get; set; }
 

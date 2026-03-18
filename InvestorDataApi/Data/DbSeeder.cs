@@ -5,41 +5,15 @@ namespace InvestorDataApi.Data;
 
 public static class DbSeeder
 {
-    public static async Task SeedAsync(InvestorDbContext db)
+    /// <summary>
+    /// Seed SQL Server (primary) with CustomerAliasMapping and CustomerMaster data.
+    /// </summary>
+    public static async Task SeedSqlServerAsync(SqlServerDbContext db)
     {
-        // Ensure schema exists
-        await db.Database.ExecuteSqlRawAsync(
-            "CREATE SCHEMA IF NOT EXISTS \"InvestorAlias\"");
+        // Ensure database and tables exist (EF creates from model)
+        await db.Database.EnsureCreatedAsync();
 
-        // Create CustomerMaster table
-        await db.Database.ExecuteSqlRawAsync(@"
-            CREATE TABLE IF NOT EXISTS ""InvestorAlias"".""CustomerMaster"" (
-                ""CanonicalCustomerId""     INT PRIMARY KEY,
-                ""CanonicalCustomerName""   VARCHAR(500),
-                ""CIS CODE""               VARCHAR(50),
-                ""Ctry Of Op""             VARCHAR(200),
-                ""MGS""                    VARCHAR(100),
-                ""Ctry of Inc""            VARCHAR(200),
-                ""Region""                 VARCHAR(200)
-            )");
-
-        // Create CustomerAliasMapping table
-        await db.Database.ExecuteSqlRawAsync(@"
-            CREATE TABLE IF NOT EXISTS ""InvestorAlias"".""CustomerAliasMapping"" (
-                ""ID""                      SERIAL PRIMARY KEY,
-                ""OriginalCustomerName""    VARCHAR(1000) NOT NULL,
-                ""CleanedCustomerName""     VARCHAR(500),
-                ""CanonicalCustomerId""     INT REFERENCES ""InvestorAlias"".""CustomerMaster""(""CanonicalCustomerId"")
-            )");
-
-        // Create indexes
-        await db.Database.ExecuteSqlRawAsync(@"
-            CREATE INDEX IF NOT EXISTS idx_cam_original  ON ""InvestorAlias"".""CustomerAliasMapping"" (""OriginalCustomerName"");
-            CREATE INDEX IF NOT EXISTS idx_cam_cleaned   ON ""InvestorAlias"".""CustomerAliasMapping"" (""CleanedCustomerName"");
-            CREATE INDEX IF NOT EXISTS idx_cam_canonical ON ""InvestorAlias"".""CustomerAliasMapping"" (""CanonicalCustomerId"");
-        ");
-
-        // Seed CustomerMaster if empty
+        // Seed CustomerMaster
         if (!await db.CustomerMasters.AnyAsync())
         {
             var masters = new List<CustomerMaster>
@@ -65,100 +39,87 @@ public static class DbSeeder
                 new() { CanonicalCustomerId = 19, CanonicalCustomerName = "Broadstreet Partners Inc",             CisCode = "H12IRAB", CountryOfOperation = "United States",  Mgs = "Insurance",            CountryOfIncorporation = "United States",  Region = "North America" },
                 new() { CanonicalCustomerId = 20, CanonicalCustomerName = "Cablevision Lightpath Inc",            CisCode = "I34JSCD", CountryOfOperation = "United States",  Mgs = "Telecommunications",   CountryOfIncorporation = "United States",  Region = "North America" },
             };
-
             db.CustomerMasters.AddRange(masters);
             await db.SaveChangesAsync();
         }
 
-        // Seed CustomerAliasMapping if empty
+        // Seed CustomerAliasMapping
         if (!await db.CustomerAliasMappings.AnyAsync())
         {
             var mappings = new List<CustomerAliasMapping>
             {
-                // Pinnacle variations (matching the screenshot)
                 new() { OriginalCustomerName = "Pinnacle Dermatology Management, LLC - Term Loan (12/21)-x1",  CleanedCustomerName = "Pinnacle Dermatology Management LLC", CanonicalCustomerId = 2 },
                 new() { OriginalCustomerName = "Pinnacle Dermatology Management, LLC - Term Loan (12/21)-x10", CleanedCustomerName = "Pinnacle Dermatology Management LLC", CanonicalCustomerId = 2 },
                 new() { OriginalCustomerName = "Pinnacle Dermatology Management LLC - ANOTHER ITEM",           CleanedCustomerName = "Pinnacle Dermatology Management LLC", CanonicalCustomerId = 2 },
                 new() { OriginalCustomerName = "Pinnacle Dermatology Mgmt LLC",                                CleanedCustomerName = "Pinnacle Dermatology Management LLC", CanonicalCustomerId = 2 },
-
-                // Alliance Animal Health
                 new() { OriginalCustomerName = "Alliance Animal Hlth",                        CleanedCustomerName = "Alliance Animal Health LLC",   CanonicalCustomerId = 1 },
                 new() { OriginalCustomerName = "Alliance Animal Health",                      CleanedCustomerName = "Alliance Animal Health LLC",   CanonicalCustomerId = 1 },
                 new() { OriginalCustomerName = "Alliance Animal Health LLC - Term Loan B",    CleanedCustomerName = "Alliance Animal Health LLC",   CanonicalCustomerId = 1 },
-
-                // OJ Limited
                 new() { OriginalCustomerName = "OJ Ltd",         CleanedCustomerName = "OJ Limited", CanonicalCustomerId = 3 },
                 new() { OriginalCustomerName = "OJ Limited",     CleanedCustomerName = "OJ Limited", CanonicalCustomerId = 3 },
-
-                // Apex
                 new() { OriginalCustomerName = "Apex Grp",            CleanedCustomerName = "Apex Group Ltd", CanonicalCustomerId = 4 },
                 new() { OriginalCustomerName = "Apex Group Limited",  CleanedCustomerName = "Apex Group Ltd", CanonicalCustomerId = 4 },
                 new() { OriginalCustomerName = "Apex Group Ltd - Revolver", CleanedCustomerName = "Apex Group Ltd", CanonicalCustomerId = 4 },
-
-                // Ardonagh
                 new() { OriginalCustomerName = "Ardonagh Grp Ltd",    CleanedCustomerName = "Ardonagh Group Ltd", CanonicalCustomerId = 5 },
                 new() { OriginalCustomerName = "Ardonagh Group",      CleanedCustomerName = "Ardonagh Group Ltd", CanonicalCustomerId = 5 },
-
-                // Athenahealth
                 new() { OriginalCustomerName = "Athenahealth Inc",        CleanedCustomerName = "Athenahealth Group Inc", CanonicalCustomerId = 6 },
                 new() { OriginalCustomerName = "Athena Health Group",     CleanedCustomerName = "Athenahealth Group Inc", CanonicalCustomerId = 6 },
-
-                // Belron
                 new() { OriginalCustomerName = "Belron",        CleanedCustomerName = "Belron SA", CanonicalCustomerId = 7 },
                 new() { OriginalCustomerName = "Belron S.A.",   CleanedCustomerName = "Belron SA", CanonicalCustomerId = 7 },
-
-                // Blackhawk
                 new() { OriginalCustomerName = "Blackhawk Network",                CleanedCustomerName = "Blackhawk Network Holdings Inc", CanonicalCustomerId = 8 },
                 new() { OriginalCustomerName = "Blackhawk Network Holdings",       CleanedCustomerName = "Blackhawk Network Holdings Inc", CanonicalCustomerId = 8 },
-
-                // Carnival
                 new() { OriginalCustomerName = "Carnival Corp",          CleanedCustomerName = "Carnival Corporation", CanonicalCustomerId = 9 },
                 new() { OriginalCustomerName = "Carnival Corporation",   CleanedCustomerName = "Carnival Corporation", CanonicalCustomerId = 9 },
-
-                // Citrix
                 new() { OriginalCustomerName = "Citrix Systems",    CleanedCustomerName = "Citrix Systems Inc", CanonicalCustomerId = 10 },
                 new() { OriginalCustomerName = "Citrix Inc",        CleanedCustomerName = "Citrix Systems Inc", CanonicalCustomerId = 10 },
-
-                // DaVita
                 new() { OriginalCustomerName = "DaVita",               CleanedCustomerName = "DaVita Inc", CanonicalCustomerId = 11 },
                 new() { OriginalCustomerName = "DaVita Healthcare",    CleanedCustomerName = "DaVita Inc", CanonicalCustomerId = 11 },
-
-                // Finastra
                 new() { OriginalCustomerName = "Finastra",          CleanedCustomerName = "Finastra Ltd", CanonicalCustomerId = 12 },
                 new() { OriginalCustomerName = "Finastra Limited",  CleanedCustomerName = "Finastra Ltd", CanonicalCustomerId = 12 },
-
-                // Jazz
                 new() { OriginalCustomerName = "Jazz Pharma",            CleanedCustomerName = "Jazz Pharmaceuticals PLC", CanonicalCustomerId = 13 },
                 new() { OriginalCustomerName = "Jazz Pharmaceuticals",   CleanedCustomerName = "Jazz Pharmaceuticals PLC", CanonicalCustomerId = 13 },
-
-                // LogMeIn
                 new() { OriginalCustomerName = "LogMeIn",     CleanedCustomerName = "LogMeIn Inc", CanonicalCustomerId = 14 },
-
-                // Paysafe
                 new() { OriginalCustomerName = "Paysafe",          CleanedCustomerName = "Paysafe Ltd", CanonicalCustomerId = 15 },
                 new() { OriginalCustomerName = "Paysafe Limited",  CleanedCustomerName = "Paysafe Ltd", CanonicalCustomerId = 15 },
-
-                // Refinitiv
                 new() { OriginalCustomerName = "Refinitiv",            CleanedCustomerName = "Refinitiv Holdings Ltd", CanonicalCustomerId = 16 },
                 new() { OriginalCustomerName = "Refinitiv Holdings",   CleanedCustomerName = "Refinitiv Holdings Ltd", CanonicalCustomerId = 16 },
-
-                // Solera
                 new() { OriginalCustomerName = "Solera Holdings",    CleanedCustomerName = "Solera Holdings Inc", CanonicalCustomerId = 17 },
                 new() { OriginalCustomerName = "Solera Inc",         CleanedCustomerName = "Solera Holdings Inc", CanonicalCustomerId = 17 },
-
-                // Envision
                 new() { OriginalCustomerName = "Envision Healthcare",    CleanedCustomerName = "Envision Healthcare Corp", CanonicalCustomerId = 18 },
                 new() { OriginalCustomerName = "Envision HC Corp",       CleanedCustomerName = "Envision Healthcare Corp", CanonicalCustomerId = 18 },
-
-                // Broadstreet
                 new() { OriginalCustomerName = "Broadstreet Partners",    CleanedCustomerName = "Broadstreet Partners Inc", CanonicalCustomerId = 19 },
-
-                // Cablevision
                 new() { OriginalCustomerName = "Cablevision Lightpath",    CleanedCustomerName = "Cablevision Lightpath Inc", CanonicalCustomerId = 20 },
             };
-
             db.CustomerAliasMappings.AddRange(mappings);
             await db.SaveChangesAsync();
         }
+    }
+
+    /// <summary>
+    /// Ensure Postgres has the InvestorAlias schema and tables ready for push.
+    /// </summary>
+    public static async Task EnsurePostgresSchemaAsync(PostgresDbContext db)
+    {
+        await db.Database.ExecuteSqlRawAsync(
+            "CREATE SCHEMA IF NOT EXISTS \"InvestorAlias\"");
+
+        await db.Database.ExecuteSqlRawAsync(@"
+            CREATE TABLE IF NOT EXISTS ""InvestorAlias"".""CustomerMaster"" (
+                ""CanonicalCustomerId""     INT PRIMARY KEY,
+                ""CanonicalCustomerName""   VARCHAR(500),
+                ""CIS CODE""               VARCHAR(50),
+                ""Ctry Of Op""             VARCHAR(200),
+                ""MGS""                    VARCHAR(100),
+                ""Ctry of Inc""            VARCHAR(200),
+                ""Region""                 VARCHAR(200)
+            )");
+
+        await db.Database.ExecuteSqlRawAsync(@"
+            CREATE TABLE IF NOT EXISTS ""InvestorAlias"".""CustomerAliasMapping"" (
+                ""ID""                      SERIAL PRIMARY KEY,
+                ""OriginalCustomerName""    VARCHAR(1000) NOT NULL,
+                ""CleanedCustomerName""     VARCHAR(500),
+                ""CanonicalCustomerId""     INT REFERENCES ""InvestorAlias"".""CustomerMaster""(""CanonicalCustomerId"")
+            )");
     }
 }
