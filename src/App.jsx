@@ -7,7 +7,6 @@ import { apolloClient } from './services/graphqlClient';
 import muiTheme from './theme/muiTheme';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
-import Customers from './pages/Customers';
 import Resolve from './pages/Resolve';
 import Mappings from './pages/Mappings';
 
@@ -20,9 +19,8 @@ const App = () => {
           <Layout>
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/customers" element={<Customers />} />
-              <Route path="/resolve" element={<Resolve />} />
               <Route path="/mappings" element={<Mappings />} />
+              <Route path="/resolve" element={<Resolve />} />
             </Routes>
           </Layout>
           <Toaster

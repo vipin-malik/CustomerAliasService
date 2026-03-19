@@ -6,9 +6,8 @@ import appConfig from '../config/appConfig';
 
 const iconMap = {
   '/': LayoutDashboard,
-  '/customers': Users,
-  '/resolve': Search,
   '/mappings': Database,
+  '/resolve': Search,
 };
 
 const Sidebar = ({ isOpen, onClose }) => {
