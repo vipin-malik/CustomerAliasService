@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Search, Play, Loader2, CheckCircle, AlertTriangle,
+  Search, Play, Loader2, CheckCircle, AlertTriangle, Plus,
   Download, ChevronDown, ChevronUp, Database, Pencil, Save, Upload, FileUp,
 } from 'lucide-react';
 import {
@@ -317,29 +317,6 @@ const Resolve = () => {
       toast.error(err.message || 'Push failed');
     } finally {
       setPushing(false);
-    }
-  };
-
-  // ─── Push SQL Server → Postgres ────────────────────────────────
-  const [pushingPg, setPushingPg] = useState(false);
-
-  const handlePushToPostgres = async () => {
-    setPushingPg(true);
-    try {
-      const res = await fetch('/api/v1/push-to-postgres', { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        toast.success(
-          `Pushed to Postgres: ${data.mastersCreated} masters created, ${data.mastersUpdated} updated, ${data.mappingsCreated} mappings created, ${data.mappingsUpdated} updated`
-        );
-        if (data.errors?.length > 0) data.errors.forEach((e) => toast.error(e));
-      } else {
-        toast.error('Failed to push to Postgres');
-      }
-    } catch (err) {
-      toast.error(err.message || 'Push to Postgres failed');
-    } finally {
-      setPushingPg(false);
     }
   };
 
@@ -666,11 +643,6 @@ const Resolve = () => {
                   onClick={handleSaveToSqlServer}>
                   {pushing ? 'Saving...' : 'Save to SQL Server'}
                 </Button>
-                <Button size="small" variant="contained" color="success" disabled={pushingPg}
-                  startIcon={pushingPg ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                  onClick={handlePushToPostgres}>
-                  {pushingPg ? 'Pushing...' : 'Push to Postgres'}
-                </Button>
               </Stack>
             )}
             {bulkResults.length > 0 && (
@@ -712,55 +684,71 @@ const Resolve = () => {
             helperText="The normalized/cleaned version of the customer name" />
 
           <Autocomplete
+            freeSolo
             options={masterOptions}
-            getOptionLabel={(opt) => typeof opt === 'string' ? opt : `${opt.canonicalCustomerId} - ${opt.canonicalCustomerName || ''}`}
+            getOptionLabel={(opt) => typeof opt === 'string' ? opt : opt.canonicalCustomerName || ''}
+            inputValue={editForm.canonicalCustomerName}
             loading={masterLoading}
-            onInputChange={(_, val) => loadMasters(val)}
+            onInputChange={(_, val, reason) => {
+              if (reason === 'input') {
+                setEditForm({ ...editForm, canonicalCustomerName: val, canonicalCustomerId: '' });
+                loadMasters(val);
+              }
+            }}
             onChange={(_, val) => {
               if (val && typeof val !== 'string') {
                 setEditForm({
                   ...editForm,
                   canonicalCustomerId: val.canonicalCustomerId.toString(),
-                  cleanedCustomerName: editForm.cleanedCustomerName || val.canonicalCustomerName || '',
                   canonicalCustomerName: val.canonicalCustomerName || '',
                   cisCode: val.cisCode || '',
                   mgs: val.mgs || '',
                   countryOfOperation: val.countryOfOperation || '',
                   region: val.region || '',
                 });
+              } else if (typeof val === 'string') {
+                setEditForm({ ...editForm, canonicalCustomerName: val, canonicalCustomerId: '' });
               }
+            }}
+            filterOptions={(options, state) => {
+              const filtered = options.filter((o) =>
+                o.canonicalCustomerName?.toLowerCase().includes(state.inputValue.toLowerCase()));
+              if (state.inputValue && !filtered.some((o) =>
+                o.canonicalCustomerName?.toLowerCase() === state.inputValue.toLowerCase())) {
+                filtered.push({ isNew: true, canonicalCustomerName: state.inputValue, canonicalCustomerId: 0 });
+              }
+              return filtered;
             }}
             renderOption={(props, opt) => {
               const { key, ...rest } = props;
+              if (opt.isNew) {
+                return (
+                  <li key="new" {...rest}>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ color: 'success.main' }}>
+                      <Plus size={14} />
+                      <Typography variant="body2" fontWeight={500}>Add "{opt.canonicalCustomerName}" as new customer</Typography>
+                    </Stack>
+                  </li>
+                );
+              }
               return (
                 <li key={key} {...rest}>
                   <Box>
-                    <Typography variant="body2" fontWeight={500}>{opt.canonicalCustomerId} - {opt.canonicalCustomerName}</Typography>
+                    <Typography variant="body2" fontWeight={500}>{opt.canonicalCustomerName}</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {opt.cisCode} | {opt.countryOfOperation} | {opt.mgs}
+                      ID: {opt.canonicalCustomerId} | {opt.cisCode || '-'} | {opt.countryOfOperation || '-'} | {opt.mgs || '-'}
                     </Typography>
                   </Box>
                 </li>
               );
             }}
             renderInput={(params) => (
-              <TextField {...params} label="Canonical Customer (search to link)" size="small"
-                helperText={editForm.canonicalCustomerId ? `Selected ID: ${editForm.canonicalCustomerId}` : 'Search and select a canonical customer'} />
+              <TextField {...params} label="Canonical Customer Name" size="small"
+                helperText={editForm.canonicalCustomerId
+                  ? `Linked to existing customer (ID: ${editForm.canonicalCustomerId})`
+                  : editForm.canonicalCustomerName ? 'New customer will be created' : 'Type to search or add new'} />
             )}
           />
-
-          <TextField label="Canonical Customer ID" fullWidth size="small" type="number"
-            value={editForm.canonicalCustomerId}
-            onChange={(e) => setEditForm({ ...editForm, canonicalCustomerId: e.target.value })}
-            helperText="Leave empty to auto-assign a new Canonical Customer ID" />
-
-          <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ mt: 1 }}>
-            Customer Master Details
-          </Typography>
-
-          <TextField label="Canonical Customer Name" fullWidth size="small"
-            value={editForm.canonicalCustomerName}
-            onChange={(e) => setEditForm({ ...editForm, canonicalCustomerName: e.target.value })} />
 
           <Stack direction="row" spacing={2}>
             <TextField label="CIS Code" fullWidth size="small"

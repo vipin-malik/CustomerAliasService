@@ -306,6 +306,38 @@ app.MapGet("/api/v1/customer-masters/{id:int}", async (int id, SqlServerDbContex
     return c is null ? Results.NotFound(new { message = "Not found" }) : Results.Ok(c);
 }).WithName("GetCustomerMasterById");
 
+// Joined view: CustomerMaster + child AliasMappings
+app.MapGet("/api/v1/customer-masters-with-aliases", async (
+    SqlServerDbContext db, int page = 1, int pageSize = 25, string? search = null) =>
+{
+    if (page < 1) page = 1;
+    if (pageSize < 1) pageSize = 25;
+    if (pageSize > 10000) pageSize = 10000;
+
+    var query = db.CustomerMasters.Include(m => m.AliasMappings).AsQueryable();
+    if (!string.IsNullOrWhiteSpace(search))
+    {
+        var term = search.Trim().ToLower();
+        query = query.Where(c =>
+            (c.CanonicalCustomerName != null && c.CanonicalCustomerName.ToLower().Contains(term)) ||
+            (c.CisCode != null && c.CisCode.ToLower().Contains(term)) ||
+            c.AliasMappings!.Any(a => a.OriginalCustomerName.ToLower().Contains(term)));
+    }
+
+    var totalCount = await query.CountAsync();
+    var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
+    if (totalPages < 1) totalPages = 1;
+
+    var items = await query.OrderBy(c => c.CanonicalCustomerName)
+        .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+
+    return Results.Ok(new PagedResult<CustomerMaster>
+    {
+        Items = items, TotalCount = totalCount,
+        PageNumber = page, PageSize = pageSize, TotalPages = totalPages,
+    });
+}).WithName("GetCustomerMastersWithAliases");
+
 // ═══════════════════════════════════════════════════════════════
 // Resolve (SQL Server — PRIMARY)
 // ═══════════════════════════════════════════════════════════════
