@@ -1,85 +1,69 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@apollo/client';
 import { motion } from 'framer-motion';
 import {
-  Database, Users, Globe, ArrowRight, Search,
+  Database, Globe, ArrowRight, Search,
   TrendingUp, FileText, Layers, MapPin,
 } from 'lucide-react';
 import { Box, Paper, Typography } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import StatsCard from '../components/StatsCard';
+import { GET_CUSTOMER_ALIAS_MAPPINGS, GET_CUSTOMER_MASTERS } from '../services/graphqlClient';
 
 const Dashboard = () => {
-  const [stats, setStats] = useState({
-    totalMappings: 0, totalMasters: 0,
-    countries: 0, regions: 0, mgsCount: 0,
+  const { data: mapData, loading: mapLoading } = useQuery(GET_CUSTOMER_ALIAS_MAPPINGS, {
+    variables: { page: 1, pageSize: 100 },
   });
-  const [recentMappings, setRecentMappings] = useState([]);
-  const [topCountries, setTopCountries] = useState([]);
-  const [topMgs, setTopMgs] = useState([]);
-  const [topRegions, setTopRegions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { data: masterData, loading: masterLoading } = useQuery(GET_CUSTOMER_MASTERS, {
+    variables: { page: 1, pageSize: 100 },
+  });
 
-  useEffect(() => { loadDashboardData(); }, []);
+  const loading = mapLoading || masterLoading;
+  const mappings = mapData?.customerAliasMappings?.items || [];
+  const masters = masterData?.customerMasters?.items || [];
 
-  const loadDashboardData = async () => {
-    try {
-      const [mapRes, masterRes] = await Promise.all([
-        fetch('/api/v1/customer-alias-mappings?page=1&pageSize=100').then((r) => r.json()),
-        fetch('/api/v1/customer-masters?page=1&pageSize=100').then((r) => r.json()),
-      ]);
+  const stats = useMemo(() => {
+    const countries = new Set(masters.map((m) => m.countryOfOperation).filter(Boolean));
+    const regions = new Set(masters.map((m) => m.region).filter(Boolean));
+    const mgsSet = new Set(masters.map((m) => m.mgs).filter(Boolean));
+    return {
+      totalMappings: mapData?.customerAliasMappings?.totalCount || mappings.length,
+      totalMasters: masterData?.customerMasters?.totalCount || masters.length,
+      countries: countries.size,
+      regions: regions.size,
+      mgsCount: mgsSet.size,
+    };
+  }, [mappings, masters, mapData, masterData]);
 
-      const mappings = mapRes.items || [];
-      const masters = masterRes.items || [];
+  const recentMappings = useMemo(() =>
+    mappings.slice(0, 10).map((m) => ({
+      id: m.id,
+      originalCustomerName: m.originalCustomerName,
+      cleanedCustomerName: m.cleanedCustomerName || '-',
+      canonicalCustomerName: m.customerMaster?.canonicalCustomerName || '-',
+      cisCode: m.customerMaster?.cisCode || '-',
+      ctryOfOp: m.customerMaster?.countryOfOperation || '-',
+      mgs: m.customerMaster?.mgs || '-',
+    })), [mappings]);
 
-      // Stats from CustomerMaster
-      const countries = new Set(masters.map((m) => m.countryOfOperation).filter(Boolean));
-      const regions = new Set(masters.map((m) => m.region).filter(Boolean));
-      const mgsSet = new Set(masters.map((m) => m.mgs).filter(Boolean));
+  const topCountries = useMemo(() => {
+    const map = {};
+    masters.forEach((m) => { if (m.countryOfOperation) map[m.countryOfOperation] = (map[m.countryOfOperation] || 0) + 1; });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, count]) => ({ name, count }));
+  }, [masters]);
 
-      setStats({
-        totalMappings: mapRes.totalCount || mappings.length,
-        totalMasters: masterRes.totalCount || masters.length,
-        countries: countries.size,
-        regions: regions.size,
-        mgsCount: mgsSet.size,
-      });
+  const topMgs = useMemo(() => {
+    const map = {};
+    masters.forEach((m) => { if (m.mgs) map[m.mgs] = (map[m.mgs] || 0) + 1; });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, count]) => ({ name, count }));
+  }, [masters]);
 
-      // Recent mappings (first 10)
-      setRecentMappings(mappings.slice(0, 10).map((m) => ({
-        id: m.id,
-        originalCustomerName: m.originalCustomerName,
-        cleanedCustomerName: m.cleanedCustomerName || '-',
-        canonicalCustomerName: m.customerMaster?.canonicalCustomerName || '-',
-        cisCode: m.customerMaster?.cisCode || '-',
-        ctryOfOp: m.customerMaster?.countryOfOperation || '-',
-        mgs: m.customerMaster?.mgs || '-',
-      })));
-
-      // Top countries (from CustomerMaster.countryOfOperation)
-      const countryMap = {};
-      masters.forEach((m) => {
-        if (m.countryOfOperation) countryMap[m.countryOfOperation] = (countryMap[m.countryOfOperation] || 0) + 1;
-      });
-      setTopCountries(Object.entries(countryMap).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, count]) => ({ name, count })));
-
-      // Top MGS (from CustomerMaster.mgs)
-      const mgsMap = {};
-      masters.forEach((m) => {
-        if (m.mgs) mgsMap[m.mgs] = (mgsMap[m.mgs] || 0) + 1;
-      });
-      setTopMgs(Object.entries(mgsMap).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, count]) => ({ name, count })));
-
-      // Top regions (from CustomerMaster.region)
-      const regionMap = {};
-      masters.forEach((m) => {
-        if (m.region) regionMap[m.region] = (regionMap[m.region] || 0) + 1;
-      });
-      setTopRegions(Object.entries(regionMap).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, count]) => ({ name, count })));
-
-    } catch { /* API not available */ }
-    finally { setLoading(false); }
-  };
+  const topRegions = useMemo(() => {
+    const map = {};
+    masters.forEach((m) => { if (m.region) map[m.region] = (map[m.region] || 0) + 1; });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, count]) => ({ name, count }));
+  }, [masters]);
 
   const mappingColumns = [
     { field: 'originalCustomerName', headerName: 'Original Customer Name', flex: 1.5, minWidth: 220 },

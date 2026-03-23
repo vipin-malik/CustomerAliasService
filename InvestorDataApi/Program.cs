@@ -1,4 +1,5 @@
 using InvestorDataApi.Data;
+using InvestorDataApi.GraphQL;
 using InvestorDataApi.Models;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
@@ -46,6 +47,12 @@ builder.Services.AddCors(options =>
     });
 });
 
+// GraphQL (HotChocolate)
+builder.Services
+    .AddGraphQLServer()
+    .AddQueryType<Query>()
+    .AddMutationType<Mutation>();
+
 var app = builder.Build();
 
 // ─── Seed databases ────────────────────────────────────────────
@@ -68,6 +75,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseCors();
+app.MapGraphQL();
 
 // ═══════════════════════════════════════════════════════════════
 // Health Check
@@ -432,6 +440,25 @@ app.MapPost("/api/v1/investor/resolve-bulk", async (BulkResolveRequest request, 
         {
             results.Add(BuildResolveResponse(inputName, partial,
                 CalculateSimpleScore(aliasLower, partial.OriginalCustomerName.ToLower())));
+            continue;
+        }
+
+        // Fallback: match against CustomerMaster canonical names
+        var masterMatch = await db.CustomerMasters
+            .Where(c => c.CanonicalCustomerName != null && c.CanonicalCustomerName.ToLower().Contains(aliasLower))
+            .FirstOrDefaultAsync();
+
+        if (masterMatch != null)
+        {
+            results.Add(new ResolveResponse
+            {
+                CustomerName = inputName, CommonName = masterMatch.CanonicalCustomerName,
+                IsResolved = true, ConfidenceScore = 70, MatchedAlias = inputName,
+                CanonicalCustomerId = masterMatch.CanonicalCustomerId,
+                CanonicalCustomerName = masterMatch.CanonicalCustomerName,
+                CisCode = masterMatch.CisCode, Country = masterMatch.CountryOfOperation,
+                Region = masterMatch.Region, Mgs = masterMatch.Mgs,
+            });
             continue;
         }
 

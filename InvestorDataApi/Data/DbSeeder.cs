@@ -13,8 +13,13 @@ public static class DbSeeder
         // Ensure database and tables exist (EF creates from model)
         await db.Database.EnsureCreatedAsync();
 
+        // Always clear and re-seed for consistent demo data
+        if (await db.CustomerAliasMappings.AnyAsync())
+            await db.CustomerAliasMappings.ExecuteDeleteAsync();
+        if (await db.CustomerMasters.AnyAsync())
+            await db.CustomerMasters.ExecuteDeleteAsync();
+
         // Seed CustomerMaster
-        if (!await db.CustomerMasters.AnyAsync())
         {
             var masters = new List<CustomerMaster>
             {
@@ -44,7 +49,6 @@ public static class DbSeeder
         }
 
         // Seed CustomerAliasMapping
-        if (!await db.CustomerAliasMappings.AnyAsync())
         {
             var mappings = new List<CustomerAliasMapping>
             {

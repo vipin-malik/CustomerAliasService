@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useQuery, useMutation } from '@apollo/client';
 import { motion } from 'framer-motion';
 import {
-  Plus, Pencil, Trash2, Loader2, RefreshCw, Upload,
+  Plus, Pencil, Trash2, Loader2, RefreshCw, Upload, Check, X,
   ChevronRight, ChevronDown, FileText,
 } from 'lucide-react';
 import {
@@ -11,99 +12,74 @@ import {
   TableContainer, TableHead, TableRow, TablePagination,
 } from '@mui/material';
 import toast from 'react-hot-toast';
-
-const API_BASE = '/api/v1';
+import {
+  GET_CUSTOMER_MASTERS_WITH_ALIASES,
+  CREATE_CUSTOMER_ALIAS_MAPPING,
+  DELETE_CUSTOMER_ALIAS_MAPPING,
+  UPDATE_CUSTOMER_MASTER,
+  PUSH_TO_POSTGRES,
+} from '../services/graphqlClient';
 
 const Mappings = () => {
-  const [masters, setMasters] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
-
-  // Expanded rows
   const [expandedIds, setExpandedIds] = useState(new Set());
 
-  // Dialog
+  // Create dialog
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogMode, setDialogMode] = useState('create');
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [selectedItem, setSelectedItem] = useState(null);
-  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     originalCustomerName: '', cleanedCustomerName: '', canonicalCustomerId: '',
     canonicalCustomerName: '', cisCode: '', mgs: '', countryOfOperation: '', region: '',
   });
 
-  // Push to Postgres
-  const [pushingPg, setPushingPg] = useState(false);
+  // Delete dialog
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedItem, setSelectedItem] = useState(null);
 
-  const handlePushToPostgres = async () => {
-    setPushingPg(true);
-    try {
-      const res = await fetch(`${API_BASE}/push-to-postgres`, { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        toast.success(
-          `Pushed to Postgres: ${data.mastersCreated} masters created, ${data.mastersUpdated} updated, ${data.mappingsCreated} mappings created, ${data.mappingsUpdated} updated`
-        );
-        if (data.errors?.length > 0) data.errors.forEach((e) => toast.error(e));
-      } else {
-        toast.error('Failed to push to Postgres');
-      }
-    } catch (err) {
-      toast.error(err.message || 'Push to Postgres failed');
-    } finally {
-      setPushingPg(false);
-    }
-  };
+  // Inline edit state
+  const [editingId, setEditingId] = useState(null);
+  const [editValues, setEditValues] = useState({});
 
-  // ─── Load data ────────────────────────────────────────────────
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ page: String(page + 1), pageSize: String(pageSize) });
-      if (search) params.append('search', search);
-      const res = await fetch(`${API_BASE}/customer-masters-with-aliases?${params}`);
-      const data = await res.json();
-      setMasters(data.items || []);
-      setTotalCount(data.totalCount || 0);
-    } catch {
-      setMasters([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, pageSize, search]);
+  // ─── Apollo query ──────────────────────────────────────────────
+  const { data, loading, refetch } = useQuery(GET_CUSTOMER_MASTERS_WITH_ALIASES, {
+    variables: { page: page + 1, pageSize, search: search || null },
+  });
 
-  useEffect(() => { loadData(); }, [loadData]);
+  const masters = data?.customerMastersWithAliases?.items || [];
+  const totalCount = data?.customerMastersWithAliases?.totalCount || 0;
 
-  // ─── Expand / collapse ────────────────────────────────────────
-  const toggleExpand = (id) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+  // ─── Apollo mutations ─────────────────────────────────────────
+  const [createMapping, { loading: creating }] = useMutation(CREATE_CUSTOMER_ALIAS_MAPPING, {
+    onCompleted: () => { toast.success('Mapping created'); setDialogOpen(false); refetch(); },
+    onError: () => toast.error('Failed to create'),
+  });
 
-  const expandAll = () => {
-    setExpandedIds(new Set(masters.map((m) => m.canonicalCustomerId)));
-  };
+  const [deleteMapping, { loading: deleting }] = useMutation(DELETE_CUSTOMER_ALIAS_MAPPING, {
+    onCompleted: () => { toast.success('Alias mapping deleted'); setDeleteDialogOpen(false); setSelectedItem(null); refetch(); },
+    onError: () => toast.error('Failed to delete'),
+  });
 
-  const collapseAll = () => {
-    setExpandedIds(new Set());
-  };
+  const [updateMaster, { loading: updating }] = useMutation(UPDATE_CUSTOMER_MASTER, {
+    onCompleted: () => { toast.success('Customer updated'); setEditingId(null); refetch(); },
+    onError: () => toast.error('Failed to update'),
+  });
 
-  // ─── CRUD ─────────────────────────────────────────────────────
-  const handleCreate = async () => {
-    setSaving(true);
-    try {
-      const res = await fetch(`${API_BASE}/customer-alias-mappings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+  const [pushToPostgres, { loading: pushingPg }] = useMutation(PUSH_TO_POSTGRES, {
+    onCompleted: ({ pushToPostgres: d }) => {
+      toast.success(
+        `Pushed to Postgres: ${d.mastersCreated} masters created, ${d.mastersUpdated} updated, ${d.mappingsCreated} mappings created, ${d.mappingsUpdated} updated`
+      );
+      if (d.errors?.length > 0) d.errors.forEach((e) => toast.error(e));
+    },
+    onError: (err) => toast.error(err.message || 'Push to Postgres failed'),
+  });
+
+  // ─── Handlers ──────────────────────────────────────────────────
+  const handleCreate = () => {
+    createMapping({
+      variables: {
+        input: {
           originalCustomerName: form.originalCustomerName,
           cleanedCustomerName: form.cleanedCustomerName || null,
           canonicalCustomerId: form.canonicalCustomerId ? parseInt(form.canonicalCustomerId) : null,
@@ -112,23 +88,14 @@ const Mappings = () => {
           mgs: form.mgs || null,
           countryOfOperation: form.countryOfOperation || null,
           region: form.region || null,
-        }),
-      });
-      if (res.ok) { toast.success('Mapping created'); setDialogOpen(false); loadData(); }
-      else toast.error('Failed to create');
-    } catch { toast.error('Failed to create'); }
-    finally { setSaving(false); }
+        },
+      },
+    });
   };
 
-  const handleDeleteAlias = async () => {
+  const handleDeleteAlias = () => {
     if (!selectedItem) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`${API_BASE}/customer-alias-mappings/${selectedItem.id}`, { method: 'DELETE' });
-      if (res.ok) { toast.success('Alias mapping deleted'); setDeleteDialogOpen(false); setSelectedItem(null); loadData(); }
-      else toast.error('Failed to delete');
-    } catch { toast.error('Failed to delete'); }
-    finally { setSaving(false); }
+    deleteMapping({ variables: { id: selectedItem.id } });
   };
 
   const openCreate = (master = null) => {
@@ -142,11 +109,73 @@ const Mappings = () => {
       countryOfOperation: master?.countryOfOperation || '',
       region: master?.region || '',
     });
-    setDialogMode('create');
     setDialogOpen(true);
   };
 
+  // ─── Inline edit ───────────────────────────────────────────────
+  const startEdit = (master, e) => {
+    e.stopPropagation();
+    setEditingId(master.canonicalCustomerId);
+    setEditValues({
+      canonicalCustomerName: master.canonicalCustomerName || '',
+      cisCode: master.cisCode || '',
+      mgs: master.mgs || '',
+      countryOfOperation: master.countryOfOperation || '',
+      region: master.region || '',
+    });
+  };
+
+  const cancelEdit = (e) => {
+    e.stopPropagation();
+    setEditingId(null);
+  };
+
+  const saveEdit = (e) => {
+    e.stopPropagation();
+    updateMaster({
+      variables: {
+        canonicalCustomerId: editingId,
+        input: {
+          canonicalCustomerName: editValues.canonicalCustomerName || null,
+          cisCode: editValues.cisCode || null,
+          mgs: editValues.mgs || null,
+          countryOfOperation: editValues.countryOfOperation || null,
+          region: editValues.region || null,
+        },
+      },
+    });
+  };
+
+  const editField = (field, value) => {
+    setEditValues((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const toggleExpand = (id) => {
+    if (editingId === id) return; // don't toggle while editing
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const expandAll = () => setExpandedIds(new Set(masters.map((m) => m.canonicalCustomerId)));
+  const collapseAll = () => setExpandedIds(new Set());
+
   const totalAliases = masters.reduce((sum, m) => sum + (m.aliasMappings?.length || 0), 0);
+  const saving = creating || deleting;
+
+  // ─── Editable cell helper ─────────────────────────────────────
+  const EditableCell = ({ field, width }) => (
+    <TextField size="small" variant="standard"
+      value={editValues[field] || ''}
+      onChange={(e) => editField(field, e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(e); if (e.key === 'Escape') cancelEdit(e); }}
+      sx={{ width: width || '100%', '& .MuiInput-input': { fontSize: '0.875rem', py: 0.25 } }}
+      autoFocus={field === 'canonicalCustomerName'}
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -182,7 +211,7 @@ const Mappings = () => {
               </IconButton>
             </Box>
 
-            <IconButton size="small" onClick={loadData} title="Refresh"
+            <IconButton size="small" onClick={() => refetch()} title="Refresh"
               sx={{ color: 'text.secondary', '&:hover': { color: 'primary.300' } }}>
               <RefreshCw size={15} />
             </IconButton>
@@ -194,7 +223,7 @@ const Mappings = () => {
             </Button>
             <Button size="small" variant="contained" color="success" disabled={pushingPg}
               startIcon={pushingPg ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-              onClick={handlePushToPostgres}
+              onClick={() => pushToPostgres()}
               sx={{ textTransform: 'none', fontWeight: 600, px: 2 }}>
               {pushingPg ? 'Pushing...' : 'Push to Postgres'}
             </Button>
@@ -216,41 +245,29 @@ const Mappings = () => {
               <TableHead>
                 <TableRow sx={{ bgcolor: 'background.default' }}>
                   <TableCell sx={{ width: 40 }} />
-                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>
-                    Canonical ID
-                  </TableCell>
-                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>
-                    Canonical Customer Name
-                  </TableCell>
-                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>
-                    CIS Code
-                  </TableCell>
-                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>
-                    Ctry Of Op
-                  </TableCell>
-                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>
-                    MGS
-                  </TableCell>
-                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>
-                    Region
-                  </TableCell>
-                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em', width: 90 }}>
-                    Aliases
-                  </TableCell>
+                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em', width: 80 }}>ID</TableCell>
+                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>Canonical Customer Name</TableCell>
+                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>CIS Code</TableCell>
+                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>Ctry Of Op</TableCell>
+                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>MGS</TableCell>
+                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>Region</TableCell>
+                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em', width: 70 }}>Aliases</TableCell>
+                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em', width: 80 }} />
                 </TableRow>
               </TableHead>
               <TableBody>
                 {masters.map((master) => {
                   const isExpanded = expandedIds.has(master.canonicalCustomerId);
+                  const isEditing = editingId === master.canonicalCustomerId;
                   const aliases = master.aliasMappings || [];
                   return (
                     <React.Fragment key={master.canonicalCustomerId}>
-                      {/* Master row */}
-                      <TableRow
-                        hover
-                        onClick={() => toggleExpand(master.canonicalCustomerId)}
-                        sx={{ cursor: 'pointer', '& td': { borderBottom: isExpanded ? 'none' : undefined } }}
-                      >
+                      <TableRow hover onClick={() => toggleExpand(master.canonicalCustomerId)}
+                        sx={{
+                          cursor: isEditing ? 'default' : 'pointer',
+                          '& td': { borderBottom: isExpanded ? 'none' : undefined },
+                          bgcolor: isEditing ? 'rgba(99, 102, 241, 0.06)' : undefined,
+                        }}>
                         <TableCell sx={{ px: 1 }}>
                           <IconButton size="small">
                             {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -260,68 +277,83 @@ const Mappings = () => {
                           <Typography variant="body2" fontWeight={500} color="text.primary">{master.canonicalCustomerId}</Typography>
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2" fontWeight={600} color="text.primary">{master.canonicalCustomerName}</Typography>
+                          {isEditing
+                            ? <EditableCell field="canonicalCustomerName" />
+                            : <Typography variant="body2" fontWeight={600} color="text.primary">{master.canonicalCustomerName}</Typography>}
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2" color="text.secondary">{master.cisCode || '-'}</Typography>
+                          {isEditing
+                            ? <EditableCell field="cisCode" />
+                            : <Typography variant="body2" color="text.secondary">{master.cisCode || '-'}</Typography>}
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2" color="text.secondary">{master.countryOfOperation || '-'}</Typography>
+                          {isEditing
+                            ? <EditableCell field="countryOfOperation" />
+                            : <Typography variant="body2" color="text.secondary">{master.countryOfOperation || '-'}</Typography>}
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2" color="text.secondary">{master.mgs || '-'}</Typography>
+                          {isEditing
+                            ? <EditableCell field="mgs" />
+                            : <Typography variant="body2" color="text.secondary">{master.mgs || '-'}</Typography>}
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2" color="text.secondary">{master.region || '-'}</Typography>
+                          {isEditing
+                            ? <EditableCell field="region" />
+                            : <Typography variant="body2" color="text.secondary">{master.region || '-'}</Typography>}
                         </TableCell>
                         <TableCell>
                           <Chip label={aliases.length} size="small" color={aliases.length > 0 ? 'primary' : 'default'} variant="outlined" />
                         </TableCell>
+                        <TableCell sx={{ px: 0.5 }}>
+                          {isEditing ? (
+                            <Stack direction="row" spacing={0.25}>
+                              <IconButton size="small" onClick={saveEdit} title="Save" disabled={updating}
+                                sx={{ color: 'success.main', '&:hover': { bgcolor: 'success.900' } }}>
+                                {updating ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                              </IconButton>
+                              <IconButton size="small" onClick={cancelEdit} title="Cancel"
+                                sx={{ color: 'text.secondary', '&:hover': { bgcolor: 'error.900', color: 'error.main' } }}>
+                                <X size={15} />
+                              </IconButton>
+                            </Stack>
+                          ) : (
+                            <IconButton size="small" onClick={(e) => startEdit(master, e)} title="Edit customer"
+                              sx={{ color: 'text.secondary', '&:hover': { color: 'primary.300' } }}>
+                              <Pencil size={14} />
+                            </IconButton>
+                          )}
+                        </TableCell>
                       </TableRow>
-
-                      {/* Expanded child rows */}
                       <TableRow>
-                        <TableCell colSpan={8} sx={{ py: 0, px: 0, borderBottom: isExpanded ? '1px solid' : 'none', borderColor: 'divider' }}>
+                        <TableCell colSpan={9} sx={{ py: 0, px: 0, borderBottom: isExpanded ? '1px solid' : 'none', borderColor: 'divider' }}>
                           <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                             <Box sx={{ mx: 4, my: 1.5, mb: 2 }}>
                               {aliases.length === 0 ? (
-                                <Typography variant="body2" color="text.secondary" sx={{ py: 1, fontStyle: 'italic' }}>
-                                  No alias mappings for this customer
-                                </Typography>
+                                <Typography variant="body2" color="text.secondary" sx={{ py: 1, fontStyle: 'italic' }}>No alias mappings for this customer</Typography>
                               ) : (
                                 <Table size="small" sx={{ bgcolor: 'rgba(99, 102, 241, 0.04)', borderRadius: 1 }}>
                                   <TableHead>
                                     <TableRow>
-                                      <TableCell sx={{ fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', color: 'text.secondary', py: 0.5 }}>
-                                        ID
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', color: 'text.secondary', py: 0.5 }}>
-                                        Original Customer Name
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', color: 'text.secondary', py: 0.5 }}>
-                                        Cleaned Customer Name
-                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', color: 'text.secondary', py: 0.5 }}>ID</TableCell>
+                                      <TableCell sx={{ fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', color: 'text.secondary', py: 0.5 }}>Original Customer Name</TableCell>
+                                      <TableCell sx={{ fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', color: 'text.secondary', py: 0.5 }}>Cleaned Customer Name</TableCell>
                                       <TableCell sx={{ width: 60, py: 0.5 }} />
                                     </TableRow>
                                   </TableHead>
                                   <TableBody>
                                     {aliases.map((alias) => (
                                       <TableRow key={alias.id} hover>
-                                        <TableCell sx={{ py: 0.75 }}>
-                                          <Typography variant="caption" color="text.secondary">{alias.id}</Typography>
-                                        </TableCell>
+                                        <TableCell sx={{ py: 0.75 }}><Typography variant="caption" color="text.secondary">{alias.id}</Typography></TableCell>
                                         <TableCell sx={{ py: 0.75 }}>
                                           <Stack direction="row" spacing={1} alignItems="center">
                                             <FileText size={12} className="text-gray-500" />
                                             <Typography variant="body2" color="text.primary">{alias.originalCustomerName}</Typography>
                                           </Stack>
                                         </TableCell>
-                                        <TableCell sx={{ py: 0.75 }}>
-                                          <Typography variant="body2" color="text.secondary">{alias.cleanedCustomerName || '-'}</Typography>
-                                        </TableCell>
+                                        <TableCell sx={{ py: 0.75 }}><Typography variant="body2" color="text.secondary">{alias.cleanedCustomerName || '-'}</Typography></TableCell>
                                         <TableCell sx={{ py: 0.75 }}>
                                           <IconButton size="small" title="Delete alias"
-                                            onClick={() => { setSelectedItem(alias); setDeleteDialogOpen(true); }}
+                                            onClick={(e) => { e.stopPropagation(); setSelectedItem(alias); setDeleteDialogOpen(true); }}
                                             sx={{ color: 'text.secondary', '&:hover': { color: 'error.main' } }}>
                                             <Trash2 size={13} />
                                           </IconButton>
@@ -343,16 +375,10 @@ const Mappings = () => {
           </TableContainer>
         )}
 
-        {/* Pagination */}
-        <TablePagination
-          component="div"
-          count={totalCount}
-          page={page}
-          onPageChange={(_, p) => setPage(p)}
-          rowsPerPage={pageSize}
+        <TablePagination component="div" count={totalCount} page={page}
+          onPageChange={(_, p) => setPage(p)} rowsPerPage={pageSize}
           onRowsPerPageChange={(e) => { setPageSize(parseInt(e.target.value)); setPage(0); }}
-          rowsPerPageOptions={[10, 25, 50]}
-        />
+          rowsPerPageOptions={[10, 25, 50]} />
       </Paper>
 
       {/* Create Alias Dialog */}
@@ -366,22 +392,18 @@ const Mappings = () => {
           <TextField label="Canonical Customer Name" fullWidth size="small"
             value={form.canonicalCustomerName} onChange={(e) => setForm({ ...form, canonicalCustomerName: e.target.value })} />
           <Stack direction="row" spacing={2}>
-            <TextField label="CIS Code" fullWidth size="small"
-              value={form.cisCode} onChange={(e) => setForm({ ...form, cisCode: e.target.value })} />
-            <TextField label="MGS" fullWidth size="small"
-              value={form.mgs} onChange={(e) => setForm({ ...form, mgs: e.target.value })} />
+            <TextField label="CIS Code" fullWidth size="small" value={form.cisCode} onChange={(e) => setForm({ ...form, cisCode: e.target.value })} />
+            <TextField label="MGS" fullWidth size="small" value={form.mgs} onChange={(e) => setForm({ ...form, mgs: e.target.value })} />
           </Stack>
           <Stack direction="row" spacing={2}>
-            <TextField label="Ctry Of Op" fullWidth size="small"
-              value={form.countryOfOperation} onChange={(e) => setForm({ ...form, countryOfOperation: e.target.value })} />
-            <TextField label="Region" fullWidth size="small"
-              value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} />
+            <TextField label="Ctry Of Op" fullWidth size="small" value={form.countryOfOperation} onChange={(e) => setForm({ ...form, countryOfOperation: e.target.value })} />
+            <TextField label="Region" fullWidth size="small" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} />
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setDialogOpen(false)} color="inherit">Cancel</Button>
           <Button onClick={handleCreate} variant="contained" disabled={saving || !form.originalCustomerName.trim()}>
-            {saving && <Loader2 size={16} className="animate-spin mr-2" />}
+            {creating && <Loader2 size={16} className="animate-spin mr-2" />}
             Create
           </Button>
         </DialogActions>
@@ -399,7 +421,7 @@ const Mappings = () => {
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setDeleteDialogOpen(false)} color="inherit">Cancel</Button>
           <Button onClick={handleDeleteAlias} color="error" variant="contained" disabled={saving}>
-            {saving && <Loader2 size={16} className="animate-spin mr-2" />}
+            {deleting && <Loader2 size={16} className="animate-spin mr-2" />}
             Delete
           </Button>
         </DialogActions>

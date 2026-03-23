@@ -116,42 +116,60 @@ async function run() {
   console.log('Table created.');
 
   // ─── Step 3: Insert sample data ──────────────────────────────
-  const existingCount = await client.query('SELECT COUNT(*) FROM bilateral_asset_level');
-  if (parseInt(existingCount.rows[0].count, 10) > 0) {
-    console.log(`Table already has ${existingCount.rows[0].count} rows. Skipping seed.`);
-    await client.end();
-    return;
-  }
+  // Clear existing data so seed always applies fresh
+  await client.query('TRUNCATE TABLE bilateral_asset_level RESTART IDENTITY');
+  console.log('Cleared existing data.');
 
   console.log('Inserting sample investor data...');
 
   const sampleData = [
+    // ── GREEN: exact alias matches → 100% confidence ───────────
     { name: 'Alliance Animal Health',       cis: 'X32EOUS', ctx: 'IPD', tranche: 'DDTL',       loanType: 'MML', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
-    { name: 'Apex Group Ltd',               cis: 'A45BKLS', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'EUR', country: 'Luxembourg',    industry: 'Financial Services' },
-    { name: 'Ardonagh Group Ltd',           cis: 'B78CKJD', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'MML', seniority: 'First Lien',  currency: 'GBP', country: 'United Kingdom', industry: 'Insurance' },
+    { name: 'Belron',                       cis: 'E56FNUV', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'MML', seniority: 'First Lien',  currency: 'EUR', country: 'Belgium',        industry: 'Automotive Services' },
+    { name: 'Carnival Corp',                cis: 'L90MVIJ', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Leisure & Travel' },
+    { name: 'Finastra',                     cis: 'Y56ZIJK', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'MML', seniority: 'First Lien',  currency: 'GBP', country: 'United Kingdom', industry: 'Financial Technology' },
+    { name: 'Jazz Pharma',                  cis: 'H35IRAB', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'Ireland',        industry: 'Pharmaceuticals' },
+    { name: 'LogMeIn',                      cis: 'L13MVIJ', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Software' },
+    { name: 'Paysafe',                      cis: 'S57TCWX', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'MML', seniority: 'First Lien',  currency: 'GBP', country: 'United Kingdom', industry: 'Financial Technology' },
+    { name: 'Refinitiv',                    cis: 'U91VEAB', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Financial Services' },
+    { name: 'DaVita',                       cis: 'T56UDYZ', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
+    { name: 'Broadstreet Partners',         cis: 'H12IRAB', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Insurance' },
+    { name: 'Solera Holdings',              cis: 'W35XGEF', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Automotive Software' },
+    { name: 'Cablevision Lightpath',        cis: 'I34JSCD', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Telecommunications' },
+    { name: 'OJ Ltd',                       cis: 'OJ3LTDX', ctx: 'IPD', tranche: 'Revolver',    loanType: 'MML', seniority: 'First Lien',  currency: 'GBP', country: 'United Kingdom', industry: 'Consumer Services' },
+    // ── AMBER: partial matches → 70-89% confidence ─────────────
+    // "Envision Health" is substring of alias "Envision Healthcare" (19 chars) → 15/19 = 78.9%
+    { name: 'Envision Health',              cis: 'X34YHGH', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
+    // "Pinnacle Dermatology Mgmt" is substring of alias "Pinnacle Dermatology Mgmt LLC" (29 chars) → 25/29 = 86.2%
+    { name: 'Pinnacle Dermatology Mgmt',    cis: 'P91DERM', ctx: 'IPD', tranche: 'Term Loan A', loanType: 'MML', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
+    // "Ardonagh Grp" is substring of alias "Ardonagh Grp Ltd" (16 chars) → 12/16 = 75%
+    { name: 'Ardonagh Grp',                 cis: 'B78CKJD', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'MML', seniority: 'First Lien',  currency: 'GBP', country: 'United Kingdom', industry: 'Insurance' },
+    // "Alliance Animal" is substring of alias "Alliance Animal Hlth" (20 chars) → 15/20 = 75%
+    { name: 'Alliance Animal',              cis: 'X32EOUS', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
+    // "Citrix Systems Inc" matches via CleanedCustomerName, scored vs alias "Citrix Systems" (14 chars) → 14/18 = 77.8%
+    { name: 'Citrix Systems Inc',           cis: 'M12NWKL', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Software' },
+    // "Paysafe Limite" is substring of alias "Paysafe Limited" (15 chars) → 14/15 = 93.3% — actually >90 so will be green
+    // Instead: "Refinitiv Hold" is substring of alias "Refinitiv Holdings" (18 chars) → 14/18 = 77.8%
+    { name: 'Refinitiv Hold',               cis: 'U91VEAB', ctx: 'IPD', tranche: 'Revolver',    loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Financial Services' },
+    // "Blackhawk Network Hold" is substring of alias "Blackhawk Network Holdings" (26 chars) → 22/26 = 84.6%
+    { name: 'Blackhawk Network Hold',       cis: 'F78GPWX', ctx: 'IPD', tranche: 'DDTL',       loanType: 'BSL', seniority: 'Second Lien', currency: 'USD', country: 'United States', industry: 'Financial Technology' },
+    // "DaVita Healthcare" matches via cleaned name → scored vs alias "DaVita Healthcare" exact? YES → 100%. Use "DaVita Health" instead.
+    // "DaVita Health" is substring of alias "DaVita Healthcare" (17 chars) → 13/17 = 76.5%
+    { name: 'DaVita Health',                cis: 'T56UDYZ', ctx: 'IPD', tranche: 'DDTL',       loanType: 'MML', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
+    // ── RED: no match anywhere → 0% unresolved ────────────────
     { name: 'Asplundh Tree Expert LLC',     cis: 'C12DLQP', ctx: 'IPD', tranche: 'Revolver',    loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Utilities' },
-    { name: 'Athenahealth Group Inc',       cis: 'D34EMRT', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare IT' },
-    { name: 'Belron SA',                    cis: 'E56FNUV', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'MML', seniority: 'First Lien',  currency: 'EUR', country: 'Belgium',        industry: 'Automotive Services' },
-    { name: 'Blackhawk Network Holdings',   cis: 'F78GPWX', ctx: 'IPD', tranche: 'DDTL',       loanType: 'BSL', seniority: 'Second Lien', currency: 'USD', country: 'United States', industry: 'Financial Technology' },
     { name: 'Blue Ribbon LLC',              cis: 'G90HQYZ', ctx: 'IPD', tranche: 'Term Loan A', loanType: 'MML', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Food & Beverage' },
-    { name: 'Broadstreet Partners Inc',     cis: 'H12IRAB', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Insurance' },
-    { name: 'Cablevision Lightpath Inc',    cis: 'I34JSCD', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Telecommunications' },
     { name: 'Camelot UK Bidco Ltd',         cis: 'J56KTEF', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'MML', seniority: 'First Lien',  currency: 'GBP', country: 'United Kingdom', industry: 'Software' },
     { name: 'Cano Health LLC',              cis: 'K78LUGH', ctx: 'IPD', tranche: 'Revolver',    loanType: 'MML', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
-    { name: 'Carnival Corporation',         cis: 'L90MVIJ', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Leisure & Travel' },
-    { name: 'Citrix Systems Inc',           cis: 'M12NWKL', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Software' },
     { name: 'ClubCorp Holdings Inc',        cis: 'N34OXMN', ctx: 'IPD', tranche: 'DDTL',       loanType: 'MML', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Leisure & Travel' },
     { name: 'Colouroz Investment GmbH',     cis: 'O56PYOP', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'MML', seniority: 'First Lien',  currency: 'EUR', country: 'Germany',        industry: 'Chemicals' },
     { name: 'Compass Minerals Intl',        cis: 'P78QZQR', ctx: 'IPD', tranche: 'Term Loan A', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Mining & Minerals' },
     { name: 'Consolidated Communications',  cis: 'Q90RAST', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Telecommunications' },
     { name: 'CPI Aerostructures Inc',       cis: 'R12SBUV', ctx: 'IPD', tranche: 'Revolver',    loanType: 'MML', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Aerospace & Defence' },
     { name: 'Cyxtera Technologies Inc',     cis: 'S34TCWX', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'MML', seniority: 'Second Lien', currency: 'USD', country: 'United States', industry: 'Data Centres' },
-    { name: 'DaVita Inc',                   cis: 'T56UDYZ', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
     { name: 'Delos Finance SARL',           cis: 'U78VEAB', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'MML', seniority: 'First Lien',  currency: 'EUR', country: 'Luxembourg',    industry: 'Financial Services' },
     { name: 'Diamond Sports Group LLC',     cis: 'V90WFCD', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Media & Entertainment' },
     { name: 'Edgewell Personal Care',       cis: 'W12XGEF', ctx: 'IPD', tranche: 'Term Loan A', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Consumer Goods' },
-    { name: 'Envision Healthcare Corp',     cis: 'X34YHGH', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
-    { name: 'Finastra Ltd',                 cis: 'Y56ZIJK', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'MML', seniority: 'First Lien',  currency: 'GBP', country: 'United Kingdom', industry: 'Financial Technology' },
     { name: 'Fleet Midco I Ltd',            cis: 'Z78AJKL', ctx: 'IPD', tranche: 'DDTL',       loanType: 'MML', seniority: 'First Lien',  currency: 'GBP', country: 'United Kingdom', industry: 'Software' },
     { name: 'Gardner Denver Holdings',      cis: 'A91BKMN', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Industrial Equipment' },
     { name: 'Global Medical Response Inc',  cis: 'B13CLOP', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
@@ -160,22 +178,17 @@ async function run() {
     { name: 'Houghton International Inc',   cis: 'E79FOUV', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'MML', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Chemicals' },
     { name: 'Idera Inc',                    cis: 'F91GPWX', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'MML', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Software' },
     { name: 'Inmarsat PLC',                 cis: 'G13HQYZ', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'GBP', country: 'United Kingdom', industry: 'Telecommunications' },
-    { name: 'Jazz Pharmaceuticals PLC',     cis: 'H35IRAB', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'Ireland',        industry: 'Pharmaceuticals' },
     { name: 'KAR Auction Services Inc',     cis: 'I57JSCD', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Automotive Services' },
     { name: 'Klockner Pentaplast Group',    cis: 'J79KTEF', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'MML', seniority: 'First Lien',  currency: 'EUR', country: 'Germany',        industry: 'Packaging' },
     { name: 'Lealand Finance Company BV',   cis: 'K91LUGH', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'MML', seniority: 'First Lien',  currency: 'EUR', country: 'Netherlands',    industry: 'Oil & Gas Services' },
-    { name: 'LogMeIn Inc',                  cis: 'L13MVIJ', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Software' },
     { name: 'Mauser Packaging Solutions',   cis: 'M35NWKL', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Packaging' },
     { name: 'McDermott International Ltd',  cis: 'N57OXMN', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Energy Services' },
     { name: 'Messer Industries GmbH',       cis: 'O79PYOP', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'MML', seniority: 'First Lien',  currency: 'EUR', country: 'Germany',        industry: 'Industrial Gases' },
     { name: 'Navicure Inc',                 cis: 'P91QZQR', ctx: 'IPD', tranche: 'DDTL',       loanType: 'MML', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare IT' },
     { name: 'Numericable Group SA',         cis: 'Q13RAST', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'EUR', country: 'France',         industry: 'Telecommunications' },
     { name: 'Ortho Clinical Diagnostics',   cis: 'R35SBUV', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
-    { name: 'Paysafe Ltd',                  cis: 'S57TCWX', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'MML', seniority: 'First Lien',  currency: 'GBP', country: 'United Kingdom', industry: 'Financial Technology' },
     { name: 'Quorum Health Corporation',    cis: 'T79UDYZ', ctx: 'IPD', tranche: 'Term Loan',   loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Healthcare' },
-    { name: 'Refinitiv Holdings Ltd',       cis: 'U91VEAB', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Financial Services' },
     { name: 'Sedgwick Claims Mgmt Services',cis: 'V13WFCD', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'MML', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Insurance' },
-    { name: 'Solera Holdings Inc',          cis: 'W35XGEF', ctx: 'IPD', tranche: 'Term Loan B', loanType: 'BSL', seniority: 'First Lien',  currency: 'USD', country: 'United States', industry: 'Automotive Software' },
   ];
 
   for (const row of sampleData) {
