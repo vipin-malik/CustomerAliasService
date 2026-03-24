@@ -36,8 +36,7 @@ const appConfig = {
 
   // Navigation
   navigation: [
-    { name: 'Dashboard', path: '/' },
-    { name: 'Resolve', path: '/resolve' },
+    { name: 'Resolve', path: '/' },
     { name: 'Mappings', path: '/mappings' },
   ],
 };

@@ -56,6 +56,7 @@ const Resolve = () => {
     canonicalCustomerName: '', cisCode: '', mgs: '', countryOfOperation: '', region: '',
   });
   const [masterOptions, setMasterOptions] = useState([]);
+  const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
 
   // ─── Apollo lazy queries ───────────────────────────────────────
   const [resolveOne, { loading: singleLoading }] = useLazyQuery(RESOLVE_ALIAS, {
@@ -611,10 +612,35 @@ const Resolve = () => {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setEditOpen(false)} color="inherit">Cancel</Button>
-          <Button onClick={handleSaveMapping} variant="contained" color="warning"
+          <Button onClick={() => setConfirmSaveOpen(true)} variant="contained" color="warning"
             disabled={editSaving || !editForm.originalCustomerName.trim()}
-            startIcon={editSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}>
+            startIcon={<Save size={16} />}>
             Save Mapping
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Save Mapping Confirmation */}
+      <Dialog open={confirmSaveOpen} onClose={() => setConfirmSaveOpen(false)} maxWidth="xs" fullWidth
+        PaperProps={{ sx: { bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider' } }}>
+        <DialogTitle>Confirm Save</DialogTitle>
+        <DialogContent>
+          <Typography color="text.secondary">
+            Save alias mapping for <strong>"{editForm.originalCustomerName}"</strong>
+            {editForm.canonicalCustomerName && <> to <strong>"{editForm.canonicalCustomerName}"</strong></>}?
+          </Typography>
+          {!editForm.canonicalCustomerId && editForm.canonicalCustomerName && (
+            <Typography variant="body2" color="warning.main" sx={{ mt: 1 }}>
+              A new canonical customer will be created.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setConfirmSaveOpen(false)} color="inherit">Cancel</Button>
+          <Button onClick={() => { setConfirmSaveOpen(false); handleSaveMapping(); }} variant="contained"
+            disabled={editSaving}
+            startIcon={editSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}>
+            Confirm
           </Button>
         </DialogActions>
       </Dialog>

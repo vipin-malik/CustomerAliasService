@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client';
 import { motion } from 'framer-motion';
 import {
-  Plus, Pencil, Trash2, Loader2, RefreshCw, Upload, Check, X,
+  Plus, Pencil, Trash2, Loader2, RefreshCw, Upload,
   ChevronRight, ChevronDown, FileText,
 } from 'lucide-react';
 import {
@@ -33,13 +33,19 @@ const Mappings = () => {
     canonicalCustomerName: '', cisCode: '', mgs: '', countryOfOperation: '', region: '',
   });
 
+  // Edit dialog
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    canonicalCustomerId: null,
+    canonicalCustomerName: '', cisCode: '', mgs: '', countryOfOperation: '', region: '',
+  });
+
+  // Confirm save dialog
+  const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
+
   // Delete dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
-
-  // Inline edit state
-  const [editingId, setEditingId] = useState(null);
-  const [editValues, setEditValues] = useState({});
 
   // ─── Apollo query ──────────────────────────────────────────────
   const { data, loading, refetch } = useQuery(GET_CUSTOMER_MASTERS_WITH_ALIASES, {
@@ -61,7 +67,7 @@ const Mappings = () => {
   });
 
   const [updateMaster, { loading: updating }] = useMutation(UPDATE_CUSTOMER_MASTER, {
-    onCompleted: () => { toast.success('Customer updated'); setEditingId(null); refetch(); },
+    onCompleted: () => { toast.success('Customer updated'); setEditDialogOpen(false); refetch(); },
     onError: () => toast.error('Failed to update'),
   });
 
@@ -112,46 +118,35 @@ const Mappings = () => {
     setDialogOpen(true);
   };
 
-  // ─── Inline edit ───────────────────────────────────────────────
-  const startEdit = (master, e) => {
+  const openEdit = (master, e) => {
     e.stopPropagation();
-    setEditingId(master.canonicalCustomerId);
-    setEditValues({
+    setEditForm({
+      canonicalCustomerId: master.canonicalCustomerId,
       canonicalCustomerName: master.canonicalCustomerName || '',
       cisCode: master.cisCode || '',
       mgs: master.mgs || '',
       countryOfOperation: master.countryOfOperation || '',
       region: master.region || '',
     });
+    setEditDialogOpen(true);
   };
 
-  const cancelEdit = (e) => {
-    e.stopPropagation();
-    setEditingId(null);
-  };
-
-  const saveEdit = (e) => {
-    e.stopPropagation();
+  const handleUpdate = () => {
     updateMaster({
       variables: {
-        canonicalCustomerId: editingId,
+        canonicalCustomerId: editForm.canonicalCustomerId,
         input: {
-          canonicalCustomerName: editValues.canonicalCustomerName || null,
-          cisCode: editValues.cisCode || null,
-          mgs: editValues.mgs || null,
-          countryOfOperation: editValues.countryOfOperation || null,
-          region: editValues.region || null,
+          canonicalCustomerName: editForm.canonicalCustomerName || null,
+          cisCode: editForm.cisCode || null,
+          mgs: editForm.mgs || null,
+          countryOfOperation: editForm.countryOfOperation || null,
+          region: editForm.region || null,
         },
       },
     });
   };
 
-  const editField = (field, value) => {
-    setEditValues((prev) => ({ ...prev, [field]: value }));
-  };
-
   const toggleExpand = (id) => {
-    if (editingId === id) return; // don't toggle while editing
     setExpandedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -163,19 +158,6 @@ const Mappings = () => {
   const collapseAll = () => setExpandedIds(new Set());
 
   const totalAliases = masters.reduce((sum, m) => sum + (m.aliasMappings?.length || 0), 0);
-  const saving = creating || deleting;
-
-  // ─── Editable cell helper ─────────────────────────────────────
-  const EditableCell = ({ field, width }) => (
-    <TextField size="small" variant="standard"
-      value={editValues[field] || ''}
-      onChange={(e) => editField(field, e.target.value)}
-      onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(e); if (e.key === 'Escape') cancelEdit(e); }}
-      sx={{ width: width || '100%', '& .MuiInput-input': { fontSize: '0.875rem', py: 0.25 } }}
-      autoFocus={field === 'canonicalCustomerName'}
-    />
-  );
 
   return (
     <div className="space-y-6">
@@ -252,76 +234,34 @@ const Mappings = () => {
                   <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>MGS</TableCell>
                   <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' }}>Region</TableCell>
                   <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em', width: 70 }}>Aliases</TableCell>
-                  <TableCell sx={{ fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em', width: 80 }} />
+                  <TableCell sx={{ width: 50 }} />
                 </TableRow>
               </TableHead>
               <TableBody>
                 {masters.map((master) => {
                   const isExpanded = expandedIds.has(master.canonicalCustomerId);
-                  const isEditing = editingId === master.canonicalCustomerId;
                   const aliases = master.aliasMappings || [];
                   return (
                     <React.Fragment key={master.canonicalCustomerId}>
                       <TableRow hover onClick={() => toggleExpand(master.canonicalCustomerId)}
-                        sx={{
-                          cursor: isEditing ? 'default' : 'pointer',
-                          '& td': { borderBottom: isExpanded ? 'none' : undefined },
-                          bgcolor: isEditing ? 'rgba(168, 85, 247, 0.06)' : undefined,
-                        }}>
+                        sx={{ cursor: 'pointer', '& td': { borderBottom: isExpanded ? 'none' : undefined } }}>
                         <TableCell sx={{ px: 1 }}>
                           <IconButton size="small">
                             {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                           </IconButton>
                         </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight={500} color="text.primary">{master.canonicalCustomerId}</Typography>
-                        </TableCell>
-                        <TableCell>
-                          {isEditing
-                            ? <EditableCell field="canonicalCustomerName" />
-                            : <Typography variant="body2" fontWeight={600} color="text.primary">{master.canonicalCustomerName}</Typography>}
-                        </TableCell>
-                        <TableCell>
-                          {isEditing
-                            ? <EditableCell field="cisCode" />
-                            : <Typography variant="body2" color="text.secondary">{master.cisCode || '-'}</Typography>}
-                        </TableCell>
-                        <TableCell>
-                          {isEditing
-                            ? <EditableCell field="countryOfOperation" />
-                            : <Typography variant="body2" color="text.secondary">{master.countryOfOperation || '-'}</Typography>}
-                        </TableCell>
-                        <TableCell>
-                          {isEditing
-                            ? <EditableCell field="mgs" />
-                            : <Typography variant="body2" color="text.secondary">{master.mgs || '-'}</Typography>}
-                        </TableCell>
-                        <TableCell>
-                          {isEditing
-                            ? <EditableCell field="region" />
-                            : <Typography variant="body2" color="text.secondary">{master.region || '-'}</Typography>}
-                        </TableCell>
-                        <TableCell>
-                          <Chip label={aliases.length} size="small" color={aliases.length > 0 ? 'primary' : 'default'} variant="outlined" />
-                        </TableCell>
+                        <TableCell><Typography variant="body2" fontWeight={500} color="text.primary">{master.canonicalCustomerId}</Typography></TableCell>
+                        <TableCell><Typography variant="body2" fontWeight={600} color="text.primary">{master.canonicalCustomerName}</Typography></TableCell>
+                        <TableCell><Typography variant="body2" color="text.secondary">{master.cisCode || '-'}</Typography></TableCell>
+                        <TableCell><Typography variant="body2" color="text.secondary">{master.countryOfOperation || '-'}</Typography></TableCell>
+                        <TableCell><Typography variant="body2" color="text.secondary">{master.mgs || '-'}</Typography></TableCell>
+                        <TableCell><Typography variant="body2" color="text.secondary">{master.region || '-'}</Typography></TableCell>
+                        <TableCell><Chip label={aliases.length} size="small" color={aliases.length > 0 ? 'primary' : 'default'} variant="outlined" /></TableCell>
                         <TableCell sx={{ px: 0.5 }}>
-                          {isEditing ? (
-                            <Stack direction="row" spacing={0.25}>
-                              <IconButton size="small" onClick={saveEdit} title="Save" disabled={updating}
-                                sx={{ color: 'success.main', '&:hover': { bgcolor: 'success.900' } }}>
-                                {updating ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-                              </IconButton>
-                              <IconButton size="small" onClick={cancelEdit} title="Cancel"
-                                sx={{ color: 'text.secondary', '&:hover': { bgcolor: 'error.900', color: 'error.main' } }}>
-                                <X size={15} />
-                              </IconButton>
-                            </Stack>
-                          ) : (
-                            <IconButton size="small" onClick={(e) => startEdit(master, e)} title="Edit customer"
-                              sx={{ color: 'text.secondary', '&:hover': { color: 'primary.300' } }}>
-                              <Pencil size={14} />
-                            </IconButton>
-                          )}
+                          <IconButton size="small" onClick={(e) => openEdit(master, e)} title="Edit customer"
+                            sx={{ color: 'text.secondary', '&:hover': { color: 'primary.300' } }}>
+                            <Pencil size={14} />
+                          </IconButton>
                         </TableCell>
                       </TableRow>
                       <TableRow>
@@ -402,9 +342,64 @@ const Mappings = () => {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setDialogOpen(false)} color="inherit">Cancel</Button>
-          <Button onClick={handleCreate} variant="contained" disabled={saving || !form.originalCustomerName.trim()}>
+          <Button onClick={handleCreate} variant="contained" disabled={creating || !form.originalCustomerName.trim()}>
             {creating && <Loader2 size={16} className="animate-spin mr-2" />}
             Create
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Customer Dialog */}
+      <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider' } }}>
+        <DialogTitle>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Pencil size={18} />
+            <span>Edit Customer</span>
+          </Stack>
+        </DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '16px !important' }}>
+          <TextField label="Canonical Customer ID" fullWidth size="small"
+            value={editForm.canonicalCustomerId || ''} InputProps={{ readOnly: true }}
+            sx={{ '& .MuiInputBase-input': { color: 'text.secondary' } }} />
+          <TextField label="Canonical Customer Name" fullWidth size="small" autoFocus
+            value={editForm.canonicalCustomerName} onChange={(e) => setEditForm({ ...editForm, canonicalCustomerName: e.target.value })} />
+          <Stack direction="row" spacing={2}>
+            <TextField label="CIS Code" fullWidth size="small"
+              value={editForm.cisCode} onChange={(e) => setEditForm({ ...editForm, cisCode: e.target.value })} />
+            <TextField label="MGS" fullWidth size="small"
+              value={editForm.mgs} onChange={(e) => setEditForm({ ...editForm, mgs: e.target.value })} />
+          </Stack>
+          <Stack direction="row" spacing={2}>
+            <TextField label="Ctry Of Op" fullWidth size="small"
+              value={editForm.countryOfOperation} onChange={(e) => setEditForm({ ...editForm, countryOfOperation: e.target.value })} />
+            <TextField label="Region" fullWidth size="small"
+              value={editForm.region} onChange={(e) => setEditForm({ ...editForm, region: e.target.value })} />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setEditDialogOpen(false)} color="inherit">Cancel</Button>
+          <Button onClick={() => setConfirmSaveOpen(true)} variant="contained"
+            disabled={updating || !editForm.canonicalCustomerName.trim()}>
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirm Save Dialog */}
+      <Dialog open={confirmSaveOpen} onClose={() => setConfirmSaveOpen(false)} maxWidth="xs" fullWidth
+        PaperProps={{ sx: { bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider' } }}>
+        <DialogTitle>Confirm Save</DialogTitle>
+        <DialogContent>
+          <Typography color="text.secondary">
+            Save changes to <strong>"{editForm.canonicalCustomerName}"</strong> (ID: {editForm.canonicalCustomerId})?
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setConfirmSaveOpen(false)} color="inherit">Cancel</Button>
+          <Button onClick={() => { setConfirmSaveOpen(false); handleUpdate(); }} variant="contained" disabled={updating}>
+            {updating && <Loader2 size={16} className="animate-spin mr-2" />}
+            Confirm
           </Button>
         </DialogActions>
       </Dialog>
@@ -420,7 +415,7 @@ const Mappings = () => {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setDeleteDialogOpen(false)} color="inherit">Cancel</Button>
-          <Button onClick={handleDeleteAlias} color="error" variant="contained" disabled={saving}>
+          <Button onClick={handleDeleteAlias} color="error" variant="contained" disabled={deleting}>
             {deleting && <Loader2 size={16} className="animate-spin mr-2" />}
             Delete
           </Button>
