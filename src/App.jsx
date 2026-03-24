@@ -29,9 +29,9 @@ const App = () => {
               duration: 3000,
               style: {
                 borderRadius: '8px',
-                background: '#25253f',
+                background: '#261e40',
                 color: '#e2e8f0',
-                border: '1px solid rgba(69, 69, 112, 0.5)',
+                border: '1px solid rgba(82, 69, 119, 0.5)',
                 fontSize: '14px',
               },
             }}

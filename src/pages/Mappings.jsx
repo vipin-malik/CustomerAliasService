@@ -266,7 +266,7 @@ const Mappings = () => {
                         sx={{
                           cursor: isEditing ? 'default' : 'pointer',
                           '& td': { borderBottom: isExpanded ? 'none' : undefined },
-                          bgcolor: isEditing ? 'rgba(99, 102, 241, 0.06)' : undefined,
+                          bgcolor: isEditing ? 'rgba(168, 85, 247, 0.06)' : undefined,
                         }}>
                         <TableCell sx={{ px: 1 }}>
                           <IconButton size="small">
@@ -331,7 +331,7 @@ const Mappings = () => {
                               {aliases.length === 0 ? (
                                 <Typography variant="body2" color="text.secondary" sx={{ py: 1, fontStyle: 'italic' }}>No alias mappings for this customer</Typography>
                               ) : (
-                                <Table size="small" sx={{ bgcolor: 'rgba(99, 102, 241, 0.04)', borderRadius: 1 }}>
+                                <Table size="small" sx={{ bgcolor: 'rgba(168, 85, 247, 0.04)', borderRadius: 1 }}>
                                   <TableHead>
                                     <TableRow>
                                       <TableCell sx={{ fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', color: 'text.secondary', py: 0.5 }}>ID</TableCell>
