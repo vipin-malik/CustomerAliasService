@@ -200,32 +200,117 @@ CustomerAliasService/
 
 ---
 
-## Setup
+## Setup — Step by Step
 
-### 1. Clone and Install
+### Prerequisites
+
+Ensure the following are installed before starting:
+
+```bash
+# Verify installations
+node --version          # v18.x or higher
+npm --version           # v9.x or higher
+dotnet --version        # 10.x or higher
+sqlcmd -?               # SQL Server CLI (optional, for manual verification)
+psql --version          # PostgreSQL CLI (optional, for manual verification)
+```
+
+### Step 1: Clone the Repository
 
 ```bash
 git clone https://github.com/vipin-malik/CustomerAliasService.git
 cd CustomerAliasService
-npm install
 ```
 
-### 2. Set Up Databases
+### Step 2: Database Setup — SQL Server
+
+The .NET API auto-creates the SQL Server database, schema, tables, and seed data on first startup. No manual setup required.
+
+**Ensure SQL Server Express is running:**
 
 ```bash
-# SQL Server (auto-creates DB on API startup)
+# Windows — check service status
 sc query MSSQL$SQLEXPRESS
 
-# PostgreSQL — seed source data
-cd server && npm install && node setup-db.js && cd ..
+# Start if not running
+net start MSSQL$SQLEXPRESS
 ```
 
-### 3. Configure Connection Strings
+**Default connection string** (in `InvestorDataApi/appsettings.json`):
+```
+Server=localhost\SQLEXPRESS;Database=CustomerAliasDb;Trusted_Connection=True;TrustServerCertificate=True;
+```
 
-Edit `InvestorDataApi/appsettings.json` if your credentials differ:
+**What gets created automatically on API startup:**
+- Database: `CustomerAliasDb`
+- Schema: `InvestorAlias`
+- Tables: `CustomerAliasMapping` (41 seed records), `CustomerMaster` (20 seed records)
+- Indexes on `OriginalCustomerName`, `CleanedCustomerName`, `CanonicalCustomerId`
+
+> **Note:** The seeder clears and re-inserts data on every startup to ensure consistent demo data. Remove the `ExecuteDeleteAsync()` calls in `DbSeeder.cs` for production use.
+
+### Step 3: Database Setup — PostgreSQL
+
+PostgreSQL serves as the source data store (`bilateral_asset_level` table) and push target.
+
+**Ensure PostgreSQL is running:**
+
+```bash
+# Windows
+net start postgresql-x64-16
+
+# Verify connection
+psql -U postgres -c "SELECT version();"
+```
+
+**Create the database and seed sample investor data:**
+
+```bash
+cd server
+npm install
+node setup-db.js
+cd ..
+```
+
+This script will:
+- Connect to PostgreSQL on `localhost:5432` with user `postgres` / password `postgres`
+- Create the `investor_db` database if it doesn't exist
+- Create the `bilateral_asset_level` table with 50 sample investor/obligor records
+- On re-run, it truncates and re-seeds the table
+
+**Default connection string** (in `InvestorDataApi/appsettings.json`):
+```
+Host=localhost;Port=5432;Database=investor_db;Username=postgres;Password=postgres
+```
+
+**Customize PostgreSQL credentials** (if different from defaults):
+
+Edit `server/.env` or pass environment variables:
+```bash
+PG_HOST=localhost
+PG_PORT=5432
+PG_USER=postgres
+PG_PASSWORD=your_password
+PG_DATABASE=investor_db
+```
+
+The API will also auto-create the `InvestorAlias` schema and push target tables in PostgreSQL on startup:
+- `InvestorAlias.CustomerMaster`
+- `InvestorAlias.CustomerAliasMapping`
+
+### Step 4: Configure Connection Strings
+
+Edit `InvestorDataApi/appsettings.json` if your database credentials differ from the defaults:
 
 ```json
 {
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
   "ConnectionStrings": {
     "SqlServer": "Server=localhost\\SQLEXPRESS;Database=CustomerAliasDb;Trusted_Connection=True;TrustServerCertificate=True;",
     "Postgres": "Host=localhost;Port=5432;Database=investor_db;Username=postgres;Password=postgres"
@@ -233,19 +318,116 @@ Edit `InvestorDataApi/appsettings.json` if your credentials differ:
 }
 ```
 
-### 4. Start
+### Step 5: Build and Run the .NET API
 
 ```bash
-# Terminal 1 — .NET API
-cd InvestorDataApi && dotnet run
+cd InvestorDataApi
 
-# Terminal 2 — React UI
+# Restore NuGet packages
+dotnet restore
+
+# Build
+dotnet build
+
+# Run (starts on http://localhost:5001)
+dotnet run
+```
+
+**On startup, the API will:**
+1. Create/verify SQL Server database and schema
+2. Clear and re-seed `CustomerAliasMapping` (41 records) and `CustomerMaster` (20 records)
+3. Create/verify PostgreSQL `InvestorAlias` push target schema
+4. Load all mappings and masters into the **in-memory cache** (`MappingsCacheService`)
+5. Start the GraphQL endpoint at `/graphql`
+6. Start REST endpoints at `/api/v1/*`
+
+**Verify the API is running:**
+
+```bash
+# Health check
+curl http://localhost:5001/health
+# Expected: {"status":"healthy","sqlServer":"connected","postgres":"connected"}
+
+# Test GraphQL
+curl -X POST http://localhost:5001/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ health { status sqlServer postgres } }"}'
+
+# Test resolve (from cache)
+curl -X POST http://localhost:5001/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ resolveAlias(aliasName: \"Belron\") { customerName commonName isResolved confidenceScore } }"}'
+
+# Test master search (from cache)
+curl -X POST http://localhost:5001/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ searchCustomerMasters(search: \"all\") { canonicalCustomerId canonicalCustomerName } }"}'
+```
+
+### Step 6: Build and Run the React UI
+
+```bash
+# From the project root (not InvestorDataApi/)
+cd ..
+
+# Install frontend dependencies
+npm install
+
+# Start development server (http://localhost:3000)
 npm run dev
 ```
 
-Open: **http://localhost:3000**
+The Vite dev server proxies these paths to the .NET API at `http://localhost:5001`:
+- `/api/*` → REST endpoints
+- `/graphql` → GraphQL endpoint
+- `/health` → Health check
 
-On startup, the API will seed databases, warm the in-memory cache, and start the GraphQL endpoint at `/graphql`.
+**Verify the UI is running:**
+
+Open **http://localhost:3000** in your browser. You should see the Resolve page with Single Resolution and Bulk Resolution sections.
+
+### Step 7: Verify End-to-End
+
+1. **Single Resolve:** Type "Belron" in the Single Resolution box and press Enter. Should show "Resolved — High (100%)" with Belron SA details.
+
+2. **Bulk Resolve:** Click "Load from Database" to load 50 investors from PostgreSQL. Click "Resolve 50 Selected" to see mixed green/amber/red results.
+
+3. **Mappings:** Navigate to the Mappings tab. Should show 20 canonical customers with 41 total alias mappings. Click the expand arrow to see aliases.
+
+4. **Export:** On the Mappings page, click "Export Excel" to download a denormalized CSV of all mappings.
+
+---
+
+## Build for Production
+
+### Frontend
+
+```bash
+# From project root
+npm run build
+# Output: dist/
+# Deploy the dist/ folder to any static file server or CDN
+```
+
+### Backend
+
+```bash
+cd InvestorDataApi
+
+# Publish self-contained release
+dotnet publish -c Release -o publish
+
+# Output: InvestorDataApi/publish/
+# Run with: ./publish/InvestorDataApi --urls "http://0.0.0.0:5001"
+```
+
+### Production Considerations
+
+- **Remove re-seeding:** In `DbSeeder.cs`, remove the `ExecuteDeleteAsync()` calls so data persists across restarts
+- **Connection strings:** Use environment variables or secrets manager instead of `appsettings.json`
+- **CORS:** Update allowed origins in `Program.cs` for your production domain
+- **HTTPS:** Configure Kestrel with TLS certificates or use a reverse proxy (nginx, IIS)
+- **Cache:** The in-memory cache refreshes from DB on every mutation — no TTL expiry needed
 
 ---
 
