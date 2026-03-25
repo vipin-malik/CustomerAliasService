@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useMutation, useLazyQuery } from '@apollo/client';
-import { CREATE_CUSTOMER_ALIAS_MAPPING, RESOLVE_ALIAS, GET_CUSTOMER_MASTERS } from '../graphql';
+import { CREATE_CUSTOMER_ALIAS_MAPPING, RESOLVE_ALIAS, SEARCH_CUSTOMER_MASTERS } from '../graphql';
 import { useNotification } from '@core/context';
 import type {
   EditFormState,
@@ -20,6 +20,10 @@ const EMPTY_FORM: EditFormState = {
   region: '',
 };
 
+const DEBOUNCE_MS = 300;
+const MIN_SEARCH_LENGTH = 2;
+const MAX_RESULTS = 20;
+
 interface UseEditMappingOptions {
   onSingleReResolved: (resolved: ResolveResponse) => void;
   onBulkRowReResolved: (rowId: number, resolved: ResolveResponse) => void;
@@ -34,24 +38,42 @@ export const useEditMapping = ({ onSingleReResolved, onBulkRowReResolved }: UseE
   const [editSource, setEditSource] = useState<'single' | 'bulk'>('single');
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [masterOptions, setMasterOptions] = useState<CustomerMasterOption[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [createMapping, { loading: editSaving }] = useMutation(CREATE_CUSTOMER_ALIAS_MAPPING);
   const [resolveOne] = useLazyQuery(RESOLVE_ALIAS);
-  const [fetchMasters, { loading: masterLoading }] = useLazyQuery(GET_CUSTOMER_MASTERS, {
-    onCompleted: (data) => setMasterOptions(data.customerMasters?.items || []),
+  const [searchMasters, { loading: masterLoading }] = useLazyQuery(SEARCH_CUSTOMER_MASTERS, {
+    onCompleted: (data) => setMasterOptions(data.searchCustomerMasters || []),
     onError: () => setMasterOptions([]),
   });
 
-  useEffect(() => {
-    fetchMasters({ variables: { page: 1, pageSize: 50, search: null } });
-  }, [fetchMasters]);
-
+  // Debounced search — fires after user stops typing for DEBOUNCE_MS
   const loadMasters = useCallback(
-    (search: string) => {
-      fetchMasters({ variables: { page: 1, pageSize: 50, search: search || null } });
+    (term: string) => {
+      setSearchTerm(term);
+
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+
+      if (!term || term.length < MIN_SEARCH_LENGTH) {
+        setMasterOptions([]);
+        return;
+      }
+
+      debounceRef.current = setTimeout(() => {
+        searchMasters({ variables: { search: term, maxResults: MAX_RESULTS } });
+      }, DEBOUNCE_MS);
     },
-    [fetchMasters],
+    [searchMasters],
   );
+
+  // Cleanup debounce on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   const openEditDialog = (
     originalName: string,
@@ -80,6 +102,8 @@ export const useEditMapping = ({ onSingleReResolved, onBulkRowReResolved }: UseE
     setEditSource(source);
     setEditRow(row);
     setEditOpen(true);
+    setMasterOptions([]);
+    setSearchTerm('');
   };
 
   const handleSaveMapping = async () => {
@@ -104,6 +128,7 @@ export const useEditMapping = ({ onSingleReResolved, onBulkRowReResolved }: UseE
       showSuccess('Mapping saved');
       setEditOpen(false);
 
+      // Re-resolve to update the result (cache is already refreshed by the mutation)
       const { data } = await resolveOne({
         variables: { aliasName: editForm.originalCustomerName.trim(), assetClass: null },
       });
@@ -133,6 +158,7 @@ export const useEditMapping = ({ onSingleReResolved, onBulkRowReResolved }: UseE
     masterOptions,
     masterLoading,
     editSaving,
+    searchTerm,
     openEditDialog,
     handleSaveMapping,
     loadMasters,

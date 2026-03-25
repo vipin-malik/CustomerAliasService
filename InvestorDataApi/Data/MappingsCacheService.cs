@@ -123,6 +123,44 @@ public class MappingsCacheService
         }
     }
 
+    /// <summary>Search masters by canonical name or CIS code. Returns up to maxResults, prioritizing prefix matches.</summary>
+    public List<CachedMaster> SearchMasters(string lowerInput, int maxResults = 20)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            // Prioritize: exact start match first, then contains
+            var prefixMatches = new List<CachedMaster>();
+            var containsMatches = new List<CachedMaster>();
+
+            foreach (var m in _allMasters)
+            {
+                var nameMatch = m.CanonicalCustomerNameLower != null && m.CanonicalCustomerNameLower.Contains(lowerInput);
+                var cisMatch = m.CisCode != null && m.CisCode.ToLowerInvariant().Contains(lowerInput);
+
+                if (!nameMatch && !cisMatch) continue;
+
+                if (m.CanonicalCustomerNameLower != null && m.CanonicalCustomerNameLower.StartsWith(lowerInput))
+                    prefixMatches.Add(m);
+                else
+                    containsMatches.Add(m);
+
+                if (prefixMatches.Count + containsMatches.Count >= maxResults * 2) break; // scan limit
+            }
+
+            var results = new List<CachedMaster>(maxResults);
+            results.AddRange(prefixMatches.Take(maxResults));
+            if (results.Count < maxResults)
+                results.AddRange(containsMatches.Take(maxResults - results.Count));
+
+            return results;
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
+    }
+
     /// <summary>In-memory master fallback: find master where canonical name contains the input.</summary>
     public CachedMaster? MasterFallback(string lowerInput)
     {

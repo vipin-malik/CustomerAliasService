@@ -81,3 +81,16 @@ export const GET_CUSTOMER_MASTERS = gql`
     }
   }
 `;
+
+export const SEARCH_CUSTOMER_MASTERS = gql`
+  query SearchCustomerMasters($search: String!, $maxResults: Int) {
+    searchCustomerMasters(search: $search, maxResults: $maxResults) {
+      canonicalCustomerId
+      canonicalCustomerName
+      cisCode
+      countryOfOperation
+      mgs
+      region
+    }
+  }
+`;

@@ -3,6 +3,7 @@ export {
   RESOLVE_ALIASES_BULK,
   GET_INVESTORS,
   GET_CUSTOMER_MASTERS,
+  SEARCH_CUSTOMER_MASTERS,
 } from './queries';
 
 export { PUSH_TO_DB } from './mutations';

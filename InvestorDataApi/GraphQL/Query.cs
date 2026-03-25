@@ -159,6 +159,26 @@ public class Query
         };
     }
 
+    // ─── Search Customer Masters — in-memory, zero DB hits ────────
+    public List<CustomerMaster> SearchCustomerMasters(
+        [Service] MappingsCacheService cache,
+        string search, int maxResults = 20)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length < 2)
+            return [];
+
+        var results = cache.SearchMasters(search.Trim().ToLowerInvariant(), maxResults);
+        return results.Select(m => new CustomerMaster
+        {
+            CanonicalCustomerId = m.CanonicalCustomerId,
+            CanonicalCustomerName = m.CanonicalCustomerName,
+            CisCode = m.CisCode,
+            CountryOfOperation = m.CountryOfOperation,
+            Mgs = m.Mgs,
+            Region = m.Region,
+        }).ToList();
+    }
+
     // ─── Resolve (single) — pure in-memory, zero DB hits ─────────
     public ResolveResponse ResolveAlias(
         [Service] MappingsCacheService cache,

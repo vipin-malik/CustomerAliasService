@@ -824,6 +824,11 @@ const ResolvePage = () => {
             getOptionLabel={(opt) => (typeof opt === 'string' ? opt : opt.canonicalCustomerName || '')}
             inputValue={editMapping.editForm.canonicalCustomerName}
             loading={editMapping.masterLoading}
+            noOptionsText={
+              editMapping.searchTerm.length < 2
+                ? 'Type at least 2 characters to search'
+                : 'No matching customers found'
+            }
             onInputChange={(_, val, reason) => {
               if (reason === 'input') {
                 editMapping.setEditForm({ ...editMapping.editForm, canonicalCustomerName: val, canonicalCustomerId: '' });
@@ -846,14 +851,13 @@ const ResolvePage = () => {
               }
             }}
             filterOptions={(options, state) => {
-              const filtered = options.filter((o) =>
-                o.canonicalCustomerName?.toLowerCase().includes(state.inputValue.toLowerCase()),
-              );
+              // Server already filtered — just add the "Add new" option if no exact match
+              const results = [...options];
               if (
-                state.inputValue &&
-                !filtered.some((o) => o.canonicalCustomerName?.toLowerCase() === state.inputValue.toLowerCase())
+                state.inputValue.length >= 2 &&
+                !results.some((o) => o.canonicalCustomerName?.toLowerCase() === state.inputValue.toLowerCase())
               ) {
-                filtered.push({
+                results.push({
                   isNew: true,
                   canonicalCustomerName: state.inputValue,
                   canonicalCustomerId: 0,
@@ -863,7 +867,7 @@ const ResolvePage = () => {
                   region: null,
                 });
               }
-              return filtered;
+              return results;
             }}
             renderOption={(props, opt) => {
               const { key, ...rest } = props;
@@ -901,9 +905,9 @@ const ResolvePage = () => {
                 helperText={
                   editMapping.editForm.canonicalCustomerId
                     ? `Linked to existing customer (ID: ${editMapping.editForm.canonicalCustomerId})`
-                    : editMapping.editForm.canonicalCustomerName
+                    : editMapping.editForm.canonicalCustomerName && editMapping.editForm.canonicalCustomerName.length >= 2
                       ? 'New customer will be created'
-                      : 'Type to search or add new'
+                      : 'Type at least 2 characters to search existing customers'
                 }
               />
             )}
