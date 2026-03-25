@@ -1,28 +1,28 @@
 # Customer Alias Manager
 
-A full-stack application for managing customer alias mappings — resolving original customer names to their cleaned and canonical forms. Uses a **dual-database architecture** with SQL Server as the primary store and PostgreSQL as the external push target. The frontend communicates with the backend exclusively via **GraphQL** (Apollo Client + HotChocolate).
+A full-stack application for managing customer alias mappings — resolving original customer names to their cleaned and canonical forms. Built for **enterprise scale** (50K+ mappings, 40K+ canonical customers, 30K+ bulk resolve). Uses a **dual-database architecture** with SQL Server as the primary store and PostgreSQL as the external push target. The frontend communicates with the backend via **GraphQL** (Apollo Client + HotChocolate), backed by an **in-memory cache** for sub-millisecond resolve operations.
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────┐     ┌──────────────────┐     ┌─────────────────────┐
-│  React UI        │────>│  .NET 10 API     │────>│  SQL Server         │
-│  localhost:3000  │     │  localhost:5001   │     │  (PRIMARY)          │
-│                  │     │                  │     │  CustomerAliasMapping│
-│  Vite + MUI +    │     │  GraphQL         │     │  CustomerMaster     │
-│  Apollo Client + │     │  (HotChocolate)  │     └─────────────────────┘
-│  Tailwind CSS    │     │  + Minimal APIs  │              │
-└──────────────────┘     │                  │     Push on demand (SQL → PG)
-        │                │                  │              │
-   Apollo Client         │                  │     ┌─────────────────────┐
-   useQuery /            │                  │────>│  PostgreSQL         │
-   useMutation           │                  │     │  (EXTERNAL)         │
-        │                └──────────────────┘     │  bilateral_asset_   │
-   /graphql endpoint                              │  level (source)     │
-                                                  │  + push target      │
-                                                  └─────────────────────┘
+┌──────────────────┐     ┌──────────────────────┐     ┌─────────────────────┐
+│  React UI (TS)   │────>│  .NET 10 API         │────>│  SQL Server         │
+│  localhost:3000  │     │  localhost:5001       │     │  (PRIMARY)          │
+│                  │     │                      │     │  CustomerAliasMapping│
+│  Vite + MUI +    │     │  GraphQL             │     │  CustomerMaster     │
+│  Apollo Client + │     │  (HotChocolate)      │     └─────────────────────┘
+│  AG Grid +       │     │                      │              │
+│  CSS Modules     │     │  In-Memory Cache     │     Push on demand (SQL → PG)
+└──────────────────┘     │  (MappingsCacheService)     │
+        │                │  O(1) exact match    │     ┌─────────────────────┐
+   Apollo Client         │  In-memory partial   │────>│  PostgreSQL         │
+   useQuery /            │  Prefix-ranked search │     │  (EXTERNAL)         │
+   useLazyQuery /        │                      │     │  bilateral_asset_   │
+   useMutation           └──────────────────────┘     │  level (source)     │
+        │                                             │  + push target      │
+   /graphql endpoint                                  └─────────────────────┘
 ```
 
 ### Database Roles
@@ -36,29 +36,80 @@ A full-stack application for managing customer alias mappings — resolving orig
 
 | Layer | Technologies |
 |-------|-------------|
-| **Frontend** | React 19, Vite 7, Apollo Client 3, MUI v7, MUI X DataGrid v8, Tailwind CSS 4, Framer Motion |
-| **Backend** | C# .NET 10, HotChocolate GraphQL 15, Minimal APIs (legacy), Entity Framework Core, Npgsql |
+| **Frontend** | React 19, TypeScript, Vite 7, Apollo Client 3, MUI v7, AG Grid 35, CSS Modules |
+| **Backend** | C# .NET 10, HotChocolate GraphQL 15, Entity Framework Core, In-Memory Cache, Npgsql |
 | **Databases** | SQL Server Express (primary), PostgreSQL 16 (external) |
+
+### Architecture Patterns
+
+- Feature-based folder structure (`@core/`, `@features/resolve/`, `@features/mappings/`)
+- Path aliases (`@core/*`, `@features/*`, `@api/*`)
+- Arrow function components (no `React.FC`)
+- Custom hooks per feature for business logic
+- GraphQL queries/mutations organized by feature with barrel exports
+- MUI-only UI components (no third-party UI libraries)
+- CSS Modules for styling (no Tailwind)
+- React Context + useReducer for notifications
+
+---
+
+## Performance at Scale
+
+### In-Memory Cache (`MappingsCacheService`)
+
+All alias mappings and customer masters are loaded into memory at startup as a singleton service:
+
+| Operation | Mechanism | Performance |
+|-----------|-----------|-------------|
+| **Exact match** | `Dictionary<string, CachedMapping>` | O(1), ~microseconds |
+| **Partial match** | In-memory linear scan on precomputed lowercase strings | <1ms for 50K records |
+| **Master search** | Prefix-first ranking (starts-with before contains) | <1ms for 40K masters |
+| **Master fallback** | In-memory scan of canonical names | <1ms |
+| **Cache refresh** | Full reload from DB after any mutation | ~200ms for 50K records |
+
+- **Resolve endpoints** are pure in-memory — zero DB hits
+- **Cache auto-refreshes** after every create, update, delete, or push mutation
+- **Thread-safe** via `ReaderWriterLockSlim` for concurrent reads
+- **Memory usage**: ~25MB for 50K mappings
+
+### Bulk Resolution (30K+ names)
+
+| Feature | Implementation |
+|---------|---------------|
+| **Chunked processing** | 5,000 names per GraphQL request |
+| **Progress feedback** | Real-time: phase, count, percentage, cancel button |
+| **Streaming results** | UI updates after each chunk completes |
+| **Resilience** | Failed chunks mark names as unresolved (no cascade) |
+| **API limits** | 50MB request body, 5-minute execution timeout |
+
+### Export (50K+ records)
+
+| Feature | Implementation |
+|---------|---------------|
+| **Mappings export** | Server-side CSV streaming via `/api/v1/export-mappings` |
+| **Resolve export** | Client-side CSV generation from in-memory results |
+| **Streaming** | `AsAsyncEnumerable()` — constant memory regardless of dataset size |
+
+### Autocomplete Search (40K+ masters)
+
+| Feature | Implementation |
+|---------|---------------|
+| **Debounced input** | 300ms debounce, min 2 characters |
+| **Cache-backed search** | `searchCustomerMasters` GraphQL query, zero DB hits |
+| **Prefix ranking** | Starts-with matches shown before contains matches |
+| **Limited results** | Top 20 matches returned |
+| **Auto-updated** | New customers searchable immediately after mutation |
 
 ---
 
 ## Prerequisites
 
-| Tool | Version | Download |
-|------|---------|----------|
-| **Node.js** | v18+ | https://nodejs.org/ |
-| **npm** | v9+ | Bundled with Node.js |
-| **.NET SDK** | 10.0+ | https://dotnet.microsoft.com/download |
-| **SQL Server** | Express 2019+ | https://www.microsoft.com/en-us/sql-server/sql-server-downloads |
-| **PostgreSQL** | 16+ | https://www.postgresql.org/download/ |
-
-Verify installations:
-
-```bash
-node --version        # v18.x or higher
-npm --version         # v9.x or higher
-dotnet --version      # 10.x or higher
-```
+| Tool | Version |
+|------|---------|
+| **Node.js** | v18+ |
+| **.NET SDK** | 10.0+ |
+| **SQL Server** | Express 2019+ |
+| **PostgreSQL** | 16+ |
 
 ---
 
@@ -67,97 +118,109 @@ dotnet --version      # 10.x or higher
 ```
 CustomerAliasService/
 ├── README.md
-├── index.html                          # Vite entry HTML
-├── package.json                        # Frontend dependencies
-├── vite.config.js                      # Vite config + API/GraphQL proxy
-├── tailwind.config.js                  # Tailwind purple theme
-├── postcss.config.js
-├── .env.example                        # Environment variable template
+├── index.html                              # Vite entry HTML
+├── package.json                            # Frontend dependencies
+├── vite.config.ts                          # Vite config + path aliases + proxy
+├── tsconfig.json                           # TypeScript config with path aliases
+├── tsconfig.node.json
+├── .env.example
+│
 ├── src/
-│   ├── main.jsx                        # React entry point
-│   ├── App.jsx                         # Router + MUI ThemeProvider + ApolloProvider
-│   ├── index.css                       # Global styles + Tailwind theme vars
-│   ├── config/
-│   │   └── appConfig.js                # App config (API URLs, navigation)
-│   ├── theme/
-│   │   └── muiTheme.js                 # MUI dark purple theme
-│   ├── styles/
-│   │   └── classes.js                  # Reusable Tailwind class strings
-│   ├── services/
-│   │   └── graphqlClient.js            # Apollo Client + all GQL queries/mutations
-│   ├── components/
-│   │   ├── Header.jsx                  # Top header bar
-│   │   ├── TabNav.jsx                  # Horizontal tab navigation
-│   │   ├── Layout.jsx                  # Page layout shell
-│   │   ├── StatsCard.jsx               # Dashboard stat card
-│   │   └── ConfidenceBadge.jsx         # Resolve confidence indicator
-│   └── pages/
-│       ├── Resolve.jsx                 # Single + bulk alias resolution (default page)
-│       └── Mappings.jsx                # Master-detail grid with edit/delete
+│   ├── main.tsx                            # Entry point + AG Grid module registration
+│   ├── App.tsx                             # Router + ApolloProvider + NotificationProvider
+│   ├── vite-env.d.ts                       # CSS module type declarations
+│   │
+│   ├── @core/                              # Core infrastructure
+│   │   ├── config/
+│   │   │   └── appConfig.ts                # App config (GraphQL URI, navigation)
+│   │   ├── graphql/
+│   │   │   ├── client.ts                   # Apollo Client (HttpLink, InMemoryCache)
+│   │   │   └── fragments.ts                # Shared GQL operations (CREATE_CUSTOMER_ALIAS_MAPPING)
+│   │   ├── theme/
+│   │   │   └── muiTheme.ts                 # MUI dark purple theme
+│   │   ├── styles/
+│   │   │   ├── variables.css               # CSS custom properties (purple palette)
+│   │   │   └── global.css                  # Global styles + AG Grid dark theme
+│   │   ├── context/
+│   │   │   └── NotificationContext.tsx      # MUI Snackbar notification provider
+│   │   ├── components/
+│   │   │   ├── Layout/                     # Page shell (Header + TabNav + content)
+│   │   │   ├── Header/                     # Purple gradient header bar
+│   │   │   └── TabNav/                     # Horizontal tab navigation
+│   │   ├── types/
+│   │   │   └── common.ts                   # Shared types (PagedResult, CustomerMaster, etc.)
+│   │   └── index.ts                        # Barrel export
+│   │
+│   └── @features/                          # Feature modules
+│       ├── resolve/
+│       │   ├── graphql/
+│       │   │   ├── queries.ts              # RESOLVE_ALIAS, RESOLVE_ALIASES_BULK, GET_INVESTORS, SEARCH_CUSTOMER_MASTERS
+│       │   │   └── mutations.ts            # PUSH_TO_DB
+│       │   ├── hooks/
+│       │   │   ├── useResolveAlias.ts       # Single resolve logic
+│       │   │   ├── useBulkResolve.ts        # Chunked bulk resolve with progress
+│       │   │   └── useEditMapping.ts        # Edit dialog + debounced master search
+│       │   ├── components/
+│       │   │   └── ConfidenceBadge/         # MUI Chip-based status indicator
+│       │   ├── types/
+│       │   │   └── resolve.types.ts         # ResolveResponse, BulkResultRow, etc.
+│       │   ├── ResolvePage.tsx              # Main resolve page (single + bulk)
+│       │   └── ResolvePage.module.css
+│       │
+│       └── mappings/
+│           ├── graphql/
+│           │   ├── queries.ts              # GET_CUSTOMER_MASTERS_WITH_ALIASES
+│           │   └── mutations.ts            # DELETE, UPDATE_CUSTOMER_MASTER, PUSH_TO_POSTGRES
+│           ├── hooks/
+│           │   ├── useMappings.ts           # Paginated query with search
+│           │   └── useMappingMutations.ts   # All mutation logic with cache invalidation
+│           ├── types/
+│           │   └── mappings.types.ts        # CustomerMasterWithAliases, etc.
+│           ├── MappingsPage.tsx             # Master-detail grid with CRUD
+│           └── MappingsPage.module.css
 │
-├── InvestorDataApi/                    # C# .NET Web API
-│   ├── Program.cs                      # Minimal APIs + GraphQL registration
-│   ├── appsettings.json                # SQL Server + Postgres connection strings
-│   ├── InvestorDataApi.csproj          # .NET project file + NuGet packages
+├── InvestorDataApi/                        # C# .NET Web API
+│   ├── Program.cs                          # GraphQL + REST endpoints + cache setup
+│   ├── appsettings.json                    # Connection strings
+│   ├── InvestorDataApi.csproj              # NuGet packages (HotChocolate, EF Core)
 │   ├── GraphQL/
-│   │   ├── Query.cs                    # All GraphQL queries (resolve, CRUD, investors)
-│   │   └── Mutation.cs                 # All GraphQL mutations (create, update, delete, push)
+│   │   ├── Query.cs                        # Queries (cached resolve, cached master search, DB queries)
+│   │   └── Mutation.cs                     # Mutations (CRUD + cache refresh after each write)
 │   ├── Data/
-│   │   ├── SqlServerDbContext.cs       # EF Core context (SQL Server - primary)
-│   │   ├── InvestorDbContext.cs         # EF Core context (PostgreSQL - source + push)
-│   │   └── DbSeeder.cs                 # Schema creation + seed data (re-seeds on startup)
-│   └── Models/
-│       ├── BilateralAsset.cs           # Source data entity (Postgres)
-│       ├── CustomerAliasMapping.cs     # Alias mapping entity
-│       ├── CustomerMaster.cs           # Canonical master entity
-│       ├── InvestorDto.cs              # Source data API response DTO
-│       ├── PagedResult.cs              # Pagination wrapper
-│       ├── ResolveModels.cs            # Resolve request/response DTOs
-│       ├── PushModels.cs               # Push-to-DB request/response DTOs
-│       └── CreateMappingRequest.cs     # Create mapping request DTO
+│   │   ├── SqlServerDbContext.cs           # EF Core context (SQL Server)
+│   │   ├── InvestorDbContext.cs            # EF Core context (PostgreSQL)
+│   │   ├── DbSeeder.cs                    # Seed data (re-seeds on startup)
+│   │   └── MappingsCacheService.cs        # Singleton in-memory cache
+│   └── Models/                             # Entity and DTO classes
 │
-└── server/                             # PostgreSQL seed script
-    ├── setup-db.js                     # Creates bilateral_asset_level + inserts sample data
+└── server/
+    ├── setup-db.js                         # PostgreSQL bilateral_asset_level seed
     └── package.json
 ```
 
 ---
 
-## Step-by-Step Setup
+## Setup
 
-### 1. Clone the Repository
+### 1. Clone and Install
 
 ```bash
 git clone https://github.com/vipin-malik/CustomerAliasService.git
 cd CustomerAliasService
-```
-
-### 2. Set Up SQL Server
-
-Ensure SQL Server Express is running.
-
-```bash
-# Check service status (Windows)
-sc query MSSQL$SQLEXPRESS
-```
-
-The API will automatically create the `CustomerAliasDb` database, schema, tables, and seed data on first run.
-
-### 3. Set Up PostgreSQL
-
-Ensure PostgreSQL is running on `localhost:5432`.
-
-```bash
-# Create the investor_db database and seed sample data
-cd server
 npm install
-node setup-db.js
-cd ..
 ```
 
-The API will automatically create the `InvestorAlias` schema and push target tables in Postgres.
+### 2. Set Up Databases
 
-### 4. Configure Connection Strings
+```bash
+# SQL Server (auto-creates DB on API startup)
+sc query MSSQL$SQLEXPRESS
+
+# PostgreSQL — seed source data
+cd server && npm install && node setup-db.js && cd ..
+```
+
+### 3. Configure Connection Strings
 
 Edit `InvestorDataApi/appsettings.json` if your credentials differ:
 
@@ -170,140 +233,55 @@ Edit `InvestorDataApi/appsettings.json` if your credentials differ:
 }
 ```
 
-### 5. Build and Run the .NET API
+### 4. Start
 
 ```bash
-cd InvestorDataApi
-dotnet restore
-dotnet build
-dotnet run
-# Starts on http://localhost:5001
-```
+# Terminal 1 — .NET API
+cd InvestorDataApi && dotnet run
 
-On startup, the API will:
-- Create `CustomerAliasDb` database in SQL Server
-- Clear and re-seed `CustomerAliasMapping` (41 records) and `CustomerMaster` (20 records)
-- Ensure PostgreSQL has the `InvestorAlias` schema ready for push
-- Start the GraphQL endpoint at `/graphql`
-
-**Verify the API:**
-```bash
-curl http://localhost:5001/health
-# Expected: {"status":"healthy","sqlServer":"connected","postgres":"connected"}
-```
-
-**Test GraphQL:**
-```bash
-curl -X POST http://localhost:5001/graphql \
-  -H "Content-Type: application/json" \
-  -d '{"query":"{ health { status sqlServer postgres } }"}'
-```
-
-### 6. Install Frontend Dependencies
-
-```bash
-# From the project root
-npm install
-```
-
-### 7. Run the Frontend
-
-```bash
+# Terminal 2 — React UI
 npm run dev
-# Starts on http://localhost:3000
 ```
 
-The Vite dev server proxies `/api/*` and `/graphql` requests to `http://localhost:5001`.
+Open: **http://localhost:3000**
 
-### 8. Open the Application
-
-```
-http://localhost:3000
-```
+On startup, the API will seed databases, warm the in-memory cache, and start the GraphQL endpoint at `/graphql`.
 
 ---
 
 ## GraphQL API
 
-The frontend communicates exclusively via GraphQL. The schema is served at `/graphql` by HotChocolate.
-
 ### Queries
 
-| Query | Description |
-|-------|-------------|
-| `health` | Health check (SQL Server + Postgres status) |
-| `investors(page, pageSize, search)` | Paginated investors from Postgres `bilateral_asset_level` |
-| `customerAliasMappings(page, pageSize, search)` | Paginated alias mappings with joined CustomerMaster |
-| `customerMasters(page, pageSize, search)` | Paginated canonical customer masters |
-| `customerMastersWithAliases(page, pageSize, search)` | Masters with nested alias mappings (master-detail) |
-| `resolveAlias(aliasName, assetClass)` | Resolve a single customer name |
-| `resolveAliasesBulk(aliases)` | Resolve multiple customer names in one call |
+| Query | Source | Description |
+|-------|--------|-------------|
+| `health` | DB | Health check (SQL Server + Postgres status) |
+| `investors(page, pageSize, search)` | DB | Paginated investors from Postgres |
+| `customerAliasMappings(page, pageSize, search)` | DB | Paginated alias mappings with joined master |
+| `customerMasters(page, pageSize, search)` | DB | Paginated canonical customer masters |
+| `customerMastersWithAliases(page, pageSize, search)` | DB | Masters with nested alias mappings |
+| `searchCustomerMasters(search, maxResults)` | **Cache** | Prefix-ranked master search (autocomplete) |
+| `resolveAlias(aliasName, assetClass)` | **Cache** | Resolve single name (O(1) exact match) |
+| `resolveAliasesBulk(aliases)` | **Cache** | Resolve multiple names in one call |
 
 ### Mutations
 
 | Mutation | Description |
 |----------|-------------|
-| `createCustomerAliasMapping(input)` | Create alias mapping (auto-creates CustomerMaster if needed) |
-| `updateCustomerMaster(canonicalCustomerId, input)` | Update canonical customer fields |
-| `deleteCustomerAliasMapping(id)` | Delete an alias mapping |
-| `pushToDb(records)` | Save resolved data to SQL Server |
+| `createCustomerAliasMapping(input)` | Create alias mapping + refresh cache |
+| `updateCustomerMaster(canonicalCustomerId, input)` | Update customer fields + refresh cache |
+| `deleteCustomerAliasMapping(id)` | Delete alias + refresh cache |
+| `pushToDb(records)` | Save resolved data to SQL Server + refresh cache |
 | `pushToPostgres` | Sync all SQL Server data to PostgreSQL |
 
-### Resolve Algorithm
+### REST Endpoints
 
-The resolve endpoint uses a three-tier matching strategy:
-
-1. **Exact match** (100% confidence) — Input matches `OriginalCustomerName` exactly
-2. **Partial match** (calculated confidence) — Input is a substring of an alias or cleaned name; score = `shorter/longer * 100`
-3. **Master fallback** (70% confidence) — Input is a substring of a `CanonicalCustomerName`
-4. **No match** (0%) — Unresolved
-
-### REST Endpoints (Legacy)
-
-The original REST endpoints remain available alongside GraphQL but are no longer used by the frontend.
-
----
-
-## Database Schema
-
-### Schema: `InvestorAlias` (SQL Server - primary, PostgreSQL - push target)
-
-**`CustomerAliasMapping`** — Maps original customer names to cleaned names
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `ID` | INT PK (identity) | Auto-increment |
-| `OriginalCustomerName` | NVARCHAR(1000) | Raw name (with tranches, suffixes, etc.) |
-| `CleanedCustomerName` | NVARCHAR(500) | Normalized/cleaned name |
-| `CanonicalCustomerId` | INT FK | Links to CustomerMaster |
-
-**`CustomerMaster`** — Canonical customer reference data
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `CanonicalCustomerId` | INT PK | Canonical ID (manually assigned) |
-| `CanonicalCustomerName` | NVARCHAR(500) | Canonical name |
-| `CIS CODE` | NVARCHAR(50) | CIS identifier |
-| `Ctry Of Op` | NVARCHAR(200) | Country of operation |
-| `MGS` | NVARCHAR(100) | Market group/sector |
-| `Ctry of Inc` | NVARCHAR(200) | Country of incorporation |
-| `Region` | NVARCHAR(200) | Geographic region |
-
-### PostgreSQL Source Table
-
-**`bilateral_asset_level`** — Source customer/obligor data (read-only, seeded by `server/setup-db.js`)
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | SERIAL PK | Auto-increment |
-| `Obligor Name` | TEXT | Customer name |
-| `CIS Code` | TEXT | CIS identifier |
-| `Tranche` | TEXT | Loan tranche |
-| `Loan Type` | TEXT | BSL/MML |
-| `Seniority` | TEXT | First Lien/Second Lien |
-| `Native Currency` | TEXT | USD/EUR/GBP |
-| `Country Reported` | TEXT | Country |
-| ... | | (+ many more financial columns) |
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /api/v1/export-mappings` | Server-side streaming CSV export (denormalized join) |
+| `POST /api/v1/investor/resolve` | Legacy single resolve |
+| `POST /api/v1/investor/resolve-bulk` | Legacy bulk resolve |
 
 ---
 
@@ -312,28 +290,25 @@ The original REST endpoints remain available alongside GraphQL but are no longer
 ### Resolve (`/` — default page)
 
 **Single Resolution:**
-- Enter any customer name/alias and resolve instantly
-- Shows: Cleaned Name, Canonical Customer ID, Canonical Name, CIS Code, MGS, Ctry Of Op, Region
+- Enter any customer name/alias and resolve instantly (from cache)
 - Confidence badge: High (green, >90%), Medium (amber, 70-90%), Low (red, <70%), Unresolved (red)
-- "Edit Mapping" button appears for unresolved or low-confidence results
-- Edit dialog with freeSolo autocomplete to link to existing or create new canonical customer
+- Edit Mapping dialog with debounced autocomplete (300ms, min 2 chars, prefix-ranked, top 20 results)
+- Original/Cleaned customer name fields disabled in edit dialog
 - Confirmation popup before saving
 
 **Bulk Resolution (3-step workflow):**
-1. **Load Customers** — Load from PostgreSQL database, upload CSV/TXT file, or paste names
-2. **Preview & Select** — DataGrid with checkboxes to select which names to resolve
-3. **Resolution Results** — DataGrid showing all results with status badges:
-   - Edit button on rows needing attention
-   - **Export CSV** — download results
-   - **Save to SQL Server** — upsert into primary tables
+1. **Load Customers** — Load from DB, upload CSV/TXT, or paste names (explicit "Load Names" button)
+2. **Preview & Select** — AG Grid with checkbox selection, pagination, sorting
+3. **Resolution Results** — AG Grid with status badges, chunked progress bar (5K/chunk), cancel button, export CSV, save to SQL Server
 
 ### Mappings (`/mappings`)
-- Master-detail expandable table: CustomerMaster rows with nested alias mappings
-- **Edit customer** — pencil icon opens popup dialog to edit canonical name, CIS code, MGS, country, region (with save confirmation)
-- **Delete alias** — trash icon on alias rows with confirmation dialog
-- **New Mapping** — create alias with auto-assign to canonical customer
-- **Push to Postgres** — sync all data to PostgreSQL
-- Server-side pagination and search across masters and aliases
+- Master-detail expandable table with nested alias mappings
+- Edit customer popup dialog with save confirmation
+- Delete alias with confirmation
+- New Mapping creation
+- Export Excel (server-side streaming CSV — handles 50K+ records)
+- Push to Postgres
+- Server-side pagination and search
 
 ---
 
@@ -343,63 +318,45 @@ The original REST endpoints remain available alongside GraphQL but are no longer
 1. Load customer names from:
    ├── PostgreSQL bilateral_asset_level table
    ├── CSV / TXT file upload
-   └── Manual paste
+   └── Manual paste (with "Load Names" button)
 
-2. Resolve names against SQL Server (via GraphQL):
-   ├── Exact match → 100% confidence (green)
-   ├── Partial match → calculated confidence (amber/red)
-   ├── Master fallback → 70% confidence (amber)
+2. Resolve names via in-memory cache (zero DB hits):
+   ├── O(1) exact match → 100% confidence (green)
+   ├── In-memory partial match → calculated confidence (amber/red)
+   ├── In-memory master fallback → 70% confidence (amber)
    └── No match → unresolved (red)
 
 3. Edit unresolved / low-confidence mappings:
-   └── Creates CustomerAliasMapping + CustomerMaster in SQL Server
+   ├── Debounced autocomplete search (cache-backed, prefix-ranked)
+   └── Creates CustomerAliasMapping + CustomerMaster → cache refreshes
 
-4. Save to SQL Server (primary):
-   └── Upserts all resolved data into SQL Server tables
+4. Save to SQL Server → cache refreshes automatically
 
-5. Push to Postgres (on demand):
-   └── Copies ALL CustomerAliasMapping + CustomerMaster from SQL Server → PostgreSQL
+5. Push to Postgres (on demand) → copies all data from SQL Server
 ```
 
 ---
 
 ## Design Theme
 
-The application uses a **dark purple theme** across all layers:
-
-- **Primary**: Purple `#a855f7` with full 50-900 palette
+Dark purple theme across all layers:
+- **Primary**: Purple `#a855f7`
 - **Accent**: Fuchsia `#d946ef`
 - **Surfaces**: Dark purple-tinted backgrounds (`#150f24` base)
-- **MUI components**: Custom-themed DataGrid, buttons, text fields, chips, dialogs
-- **Tailwind CSS**: Matching purple primary/accent/surface variables
-
----
-
-## Environment Variables (Optional)
-
-Create a `.env` file in the project root to override defaults:
-
-```env
-VITE_API_BASE_URL=/api/v1/investor
-VITE_CUSTOMER_API_BASE_URL=/api/v1/investors
-VITE_GRAPHQL_URI=/graphql
-```
+- **AG Grid**: Custom dark theme via `themeQuartz.withParams()`
+- **Styling**: CSS Modules + CSS custom properties (no Tailwind)
 
 ---
 
 ## Build for Production
 
-### Frontend
 ```bash
-npm run build
-# Output: dist/
-```
+# Frontend
+npm run build          # Output: dist/
 
-### Backend
-```bash
+# Backend
 cd InvestorDataApi
 dotnet publish -c Release -o publish
-# Output: InvestorDataApi/publish/
 ```
 
 ---
@@ -414,30 +371,6 @@ dotnet publish -c Release -o publish
 | Postgres not running | `net start postgresql-x64-16` |
 | Health shows "degraded" | Check connection strings in `appsettings.json` |
 | Frontend shows no data | Ensure .NET API is running on port 5001 |
-| GraphQL 400 errors | Check input type names match schema (use `/graphql` IDE to explore) |
-| Push to Postgres fails | Ensure PostgreSQL is running and `InvestorAlias` schema exists |
-
----
-
-## Quick Start
-
-Open three terminals:
-
-**Terminal 1 — Ensure databases are running:**
-```bash
-net start MSSQL$SQLEXPRESS
-net start postgresql-x64-16
-```
-
-**Terminal 2 — .NET API:**
-```bash
-cd InvestorDataApi
-dotnet run
-```
-
-**Terminal 3 — React UI:**
-```bash
-npm run dev
-```
-
-Open: **http://localhost:3000**
+| AG Grid shows no rows | Check `AllCommunityModule` is registered in `main.tsx` |
+| GraphQL 400 errors | Check input type names match schema (use `/graphql` IDE) |
+| Export fails | Ensure API is reachable at `/api/v1/export-mappings` |
