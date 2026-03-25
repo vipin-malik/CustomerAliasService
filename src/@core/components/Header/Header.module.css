@@ -1,0 +1,36 @@
+.header {
+  background: linear-gradient(to right, var(--color-primary-800), var(--color-primary-700), var(--color-primary-800));
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  box-shadow: 0 4px 12px rgba(88, 28, 135, 0.4);
+}
+
+.appName {
+  color: #ffffff;
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+}
+
+.appName:hover {
+  color: #ffffff;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.iconButton {
+  color: var(--color-primary-200) !important;
+  transition: color 0.2s ease !important;
+}
+
+.iconButton:hover {
+  color: #ffffff !important;
+}

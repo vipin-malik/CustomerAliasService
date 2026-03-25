@@ -1,0 +1,16 @@
+.root {
+  min-height: 100vh;
+  background-color: var(--color-surface-900);
+  display: flex;
+  flex-direction: column;
+}
+
+.content {
+  flex: 1;
+  padding: 24px;
+  background: linear-gradient(
+    to bottom right,
+    rgba(200, 192, 224, 0.3),
+    rgba(168, 156, 200, 0.2)
+  );
+}

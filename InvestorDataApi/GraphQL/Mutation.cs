@@ -9,6 +9,7 @@ public class Mutation
     // ─── Create Customer Alias Mapping ───────────────────────────
     public async Task<CustomerAliasMapping> CreateCustomerAliasMapping(
         [Service] SqlServerDbContext db,
+        [Service] MappingsCacheService cache,
         CreateMappingInput input)
     {
         var canonicalName = input.CanonicalCustomerName?.Trim()
@@ -67,24 +68,30 @@ public class Mutation
         db.CustomerAliasMappings.Add(mapping);
         await db.SaveChangesAsync();
 
-        return (await db.CustomerAliasMappings.Include(m => m.CustomerMaster)
+        var result = (await db.CustomerAliasMappings.Include(m => m.CustomerMaster)
             .FirstOrDefaultAsync(m => m.Id == mapping.Id))!;
+        await cache.RefreshAsync();
+        return result;
     }
 
     // ─── Delete Customer Alias Mapping ───────────────────────────
     public async Task<bool> DeleteCustomerAliasMapping(
-        [Service] SqlServerDbContext db, int id)
+        [Service] SqlServerDbContext db,
+        [Service] MappingsCacheService cache,
+        int id)
     {
         var m = await db.CustomerAliasMappings.FindAsync(id);
         if (m is null) return false;
         db.CustomerAliasMappings.Remove(m);
         await db.SaveChangesAsync();
+        await cache.RefreshAsync();
         return true;
     }
 
     // ─── Update Customer Master ───────────────────────────────────
     public async Task<CustomerMaster?> UpdateCustomerMaster(
         [Service] SqlServerDbContext db,
+        [Service] MappingsCacheService cache,
         int canonicalCustomerId, UpdateCustomerMasterInput input)
     {
         var master = await db.CustomerMasters.FindAsync(canonicalCustomerId);
@@ -98,11 +105,13 @@ public class Mutation
         if (input.Region != null) master.Region = input.Region.Trim();
 
         await db.SaveChangesAsync();
+        await cache.RefreshAsync();
         return master;
     }
 
     // ─── Push to SQL Server (save resolve results) ───────────────
     public async Task<PushToDbResponse> PushToDb(
+        [Service] MappingsCacheService cache,
         [Service] SqlServerDbContext db,
         List<PushRecordInput> records)
     {
@@ -176,6 +185,7 @@ public class Mutation
             catch (Exception ex) { response.Errors.Add($"Error: {record.OriginalCustomerName}: {ex.Message}"); }
         }
         await db.SaveChangesAsync();
+        await cache.RefreshAsync();
         return response;
     }
 

@@ -1,0 +1,90 @@
+@import './variables.css';
+
+/* Base body styles */
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-surface-900);
+  color: #e2e8f0;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar - dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface-800);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-400);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary-500);
+}
+
+/* Keyframe animations */
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  0% {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* AG Grid dark theme customization */
+.ag-theme-alpine-dark {
+  --ag-background-color: var(--color-surface-900);
+  --ag-header-background-color: var(--color-surface-700);
+  --ag-odd-row-background-color: var(--color-surface-900);
+  --ag-row-hover-color: rgba(168, 85, 247, 0.08);
+  --ag-selected-row-background-color: rgba(168, 85, 247, 0.15);
+  --ag-border-color: rgba(82, 69, 119, 0.3);
+  --ag-header-foreground-color: #94a3b8;
+  --ag-foreground-color: #e2e8f0;
+  --ag-secondary-foreground-color: #94a3b8;
+  --ag-range-selection-background-color: rgba(168, 85, 247, 0.2);
+  --ag-range-selection-border-color: var(--color-primary-500);
+  --ag-checkbox-checked-color: var(--color-primary-500);
+  --ag-checkbox-unchecked-color: var(--color-surface-400);
+  --ag-input-focus-border-color: var(--color-primary-500);
+}
+
+.ag-theme-alpine-dark .ag-header-cell-label {
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ag-theme-alpine-dark .ag-cell {
+  font-size: 0.8125rem;
+}
+
+.ag-theme-alpine-dark .ag-row {
+  border-bottom: 1px solid rgba(82, 69, 119, 0.2);
+}
+
+.ag-theme-alpine-dark .ag-paging-panel {
+  border-top: 1px solid rgba(82, 69, 119, 0.4);
+  color: #94a3b8;
+}

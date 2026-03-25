@@ -1,0 +1,36 @@
+.nav {
+  background-color: var(--color-surface-900);
+  border-bottom: 1px solid rgba(61, 50, 94, 0.3);
+  padding: 0 24px;
+}
+
+.tabList {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tab {
+  padding: 12px 20px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #9ca3af;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.tab:hover {
+  color: #e5e7eb;
+  border-bottom-color: #6b7280;
+}
+
+.active {
+  color: var(--color-primary-300);
+  border-bottom-color: var(--color-primary-400);
+}
+
+.active:hover {
+  color: var(--color-primary-300);
+  border-bottom-color: var(--color-primary-400);
+}

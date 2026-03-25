@@ -6,6 +6,9 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Increase request body size for bulk operations (30K+ names)
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 50 * 1024 * 1024); // 50MB
+
 // JSON — prevent circular references
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -47,11 +50,19 @@ builder.Services.AddCors(options =>
     });
 });
 
-// GraphQL (HotChocolate)
+// In-memory mappings cache (singleton)
+builder.Services.AddSingleton<MappingsCacheService>();
+
+// GraphQL (HotChocolate) — increase limits for bulk operations (30K+ names)
 builder.Services
     .AddGraphQLServer()
     .AddQueryType<Query>()
-    .AddMutationType<Mutation>();
+    .AddMutationType<Mutation>()
+    .ModifyRequestOptions(o =>
+    {
+        o.ExecutionTimeout = TimeSpan.FromMinutes(5);
+    })
+    .AddMaxExecutionDepthRule(20);
 
 var app = builder.Build();
 
@@ -72,6 +83,11 @@ using (var scope = app.Services.CreateScope())
     {
         Log.Error(ex, "Failed to seed databases");
     }
+
+    // Warm the mappings cache
+    var cache = app.Services.GetRequiredService<MappingsCacheService>();
+    await cache.RefreshAsync();
+    Log.Information("Mappings cache loaded");
 }
 
 app.UseCors();
@@ -621,6 +637,84 @@ app.MapPost("/api/v1/push-to-db", async (PushToDbRequest request, SqlServerDbCon
     await db.SaveChangesAsync();
     return Results.Ok(response);
 }).WithName("PushToDb");
+
+// ═══════════════════════════════════════════════════════════════
+// Export Mappings as CSV (server-side generation for large datasets)
+// ═══════════════════════════════════════════════════════════════
+
+app.MapGet("/api/v1/export-mappings", async (SqlServerDbContext db, HttpContext httpContext) =>
+{
+    httpContext.Response.ContentType = "text/csv; charset=utf-8";
+    httpContext.Response.Headers.Append("Content-Disposition", "attachment; filename=customer-alias-mappings.csv");
+
+    var writer = httpContext.Response.BodyWriter;
+    var encoding = System.Text.Encoding.UTF8;
+
+    // Write BOM for Excel
+    await httpContext.Response.Body.WriteAsync(encoding.GetPreamble());
+
+    // Write header
+    await WriteLineAsync(httpContext.Response.Body, encoding,
+        "Canonical Customer ID,Canonical Customer Name,CIS Code,Country of Operation,MGS,Region,Alias ID,Original Customer Name,Cleaned Customer Name");
+
+    // Stream rows using a single JOIN query — no full materialization in memory
+    var mappings = db.CustomerAliasMappings
+        .Include(m => m.CustomerMaster)
+        .OrderBy(m => m.CustomerMaster!.CanonicalCustomerName)
+        .ThenBy(m => m.OriginalCustomerName)
+        .AsAsyncEnumerable();
+
+    await foreach (var m in mappings)
+    {
+        var line = string.Join(",",
+            m.CanonicalCustomerId?.ToString() ?? "",
+            CsvEscape(m.CustomerMaster?.CanonicalCustomerName),
+            CsvEscape(m.CustomerMaster?.CisCode),
+            CsvEscape(m.CustomerMaster?.CountryOfOperation),
+            CsvEscape(m.CustomerMaster?.Mgs),
+            CsvEscape(m.CustomerMaster?.Region),
+            m.Id.ToString(),
+            CsvEscape(m.OriginalCustomerName),
+            CsvEscape(m.CleanedCustomerName));
+
+        await WriteLineAsync(httpContext.Response.Body, encoding, line);
+    }
+
+    // Also include masters that have NO alias mappings
+    var masterIdsWithAliases = db.CustomerAliasMappings.Select(m => m.CanonicalCustomerId).Distinct();
+    var orphanMasters = db.CustomerMasters
+        .Where(m => !masterIdsWithAliases.Contains(m.CanonicalCustomerId))
+        .OrderBy(m => m.CanonicalCustomerName)
+        .AsAsyncEnumerable();
+
+    await foreach (var m in orphanMasters)
+    {
+        var line = string.Join(",",
+            m.CanonicalCustomerId.ToString(),
+            CsvEscape(m.CanonicalCustomerName),
+            CsvEscape(m.CisCode),
+            CsvEscape(m.CountryOfOperation),
+            CsvEscape(m.Mgs),
+            CsvEscape(m.Region),
+            "", "", "");
+
+        await WriteLineAsync(httpContext.Response.Body, encoding, line);
+    }
+}).WithName("ExportMappingsCsv");
+
+static string CsvEscape(string? value)
+{
+    if (string.IsNullOrEmpty(value)) return "";
+    if (value.Contains(',') || value.Contains('"') || value.Contains('\n'))
+        return $"\"{value.Replace("\"", "\"\"")}\"";
+    return value;
+}
+
+static async Task WriteLineAsync(Stream stream, System.Text.Encoding encoding, string line)
+{
+    var bytes = encoding.GetBytes(line + "\n");
+    await stream.WriteAsync(bytes);
+}
 
 // ─── Helpers ───────────────────────────────────────────────────
 

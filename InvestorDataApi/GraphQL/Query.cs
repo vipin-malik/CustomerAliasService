@@ -159,46 +159,41 @@ public class Query
         };
     }
 
-    // ─── Resolve (single) ────────────────────────────────────────
-    public async Task<ResolveResponse> ResolveAlias(
-        [Service] SqlServerDbContext db,
+    // ─── Resolve (single) — pure in-memory, zero DB hits ─────────
+    public ResolveResponse ResolveAlias(
+        [Service] MappingsCacheService cache,
         string aliasName, string? assetClass = null)
     {
         if (string.IsNullOrWhiteSpace(aliasName))
             return new ResolveResponse { CustomerName = aliasName, IsResolved = false, ConfidenceScore = 0 };
 
         var name = aliasName.Trim();
-        var lower = name.ToLower();
+        var lower = name.ToLowerInvariant();
 
-        var exact = await db.CustomerAliasMappings.Include(m => m.CustomerMaster)
-            .Where(m => m.OriginalCustomerName.ToLower() == lower).FirstOrDefaultAsync();
+        // Tier 1: O(1) exact match
+        var exact = cache.ExactMatch(lower);
         if (exact != null)
-            return BuildResponse(name, exact, 100);
+            return BuildCachedResponse(name, exact, 100);
 
-        var partials = await db.CustomerAliasMappings.Include(m => m.CustomerMaster)
-            .Where(m => m.OriginalCustomerName.ToLower().Contains(lower)
-                      || (m.CleanedCustomerName != null && m.CleanedCustomerName.ToLower().Contains(lower)))
-            .Take(10).ToListAsync();
-
+        // Tier 2: in-memory partial match
+        var partials = cache.PartialMatch(lower, 10);
         if (partials.Count > 0)
         {
-            var best = partials.First();
+            var best = partials[0];
             var potentials = partials.GroupBy(m => m.CleanedCustomerName)
                 .Select(g => new PotentialMatch
                 {
                     CommonName = g.Key ?? "", MatchedAlias = g.First().OriginalCustomerName,
-                    ConfidenceScore = CalcScore(lower, g.First().OriginalCustomerName.ToLower()),
+                    ConfidenceScore = CalcScore(lower, g.First().OriginalCustomerNameLower),
                 }).OrderByDescending(p => p.ConfidenceScore).ToList();
 
-            var resp = BuildResponse(name, best, potentials.First().ConfidenceScore);
+            var resp = BuildCachedResponse(name, best, potentials[0].ConfidenceScore);
             resp.PotentialMatches = potentials.Count > 1 ? potentials : null;
             return resp;
         }
 
-        var master = await db.CustomerMasters
-            .Where(c => c.CanonicalCustomerName != null && c.CanonicalCustomerName.ToLower().Contains(lower))
-            .FirstOrDefaultAsync();
-
+        // Tier 3: in-memory master fallback
+        var master = cache.MasterFallback(lower);
         if (master != null)
             return new ResolveResponse
             {
@@ -213,12 +208,12 @@ public class Query
         return new ResolveResponse { CustomerName = name, CommonName = name, IsResolved = false, ConfidenceScore = 0 };
     }
 
-    // ─── Resolve (bulk) ──────────────────────────────────────────
-    public async Task<List<ResolveResponse>> ResolveAliasesBulk(
-        [Service] SqlServerDbContext db,
+    // ─── Resolve (bulk) — pure in-memory, zero DB hits ───────────
+    public List<ResolveResponse> ResolveAliasesBulk(
+        [Service] MappingsCacheService cache,
         List<AliasInput> aliases)
     {
-        var results = new List<ResolveResponse>();
+        var results = new List<ResolveResponse>(aliases.Count);
         foreach (var alias in aliases)
         {
             var inputName = alias.AliasName?.Trim() ?? "";
@@ -228,25 +223,20 @@ public class Query
                 continue;
             }
 
-            var lower = inputName.ToLower();
+            var lower = inputName.ToLowerInvariant();
 
-            var match = await db.CustomerAliasMappings.Include(m => m.CustomerMaster)
-                .Where(m => m.OriginalCustomerName.ToLower() == lower).FirstOrDefaultAsync();
-            if (match != null) { results.Add(BuildResponse(inputName, match, 100)); continue; }
+            var exact = cache.ExactMatch(lower);
+            if (exact != null) { results.Add(BuildCachedResponse(inputName, exact, 100)); continue; }
 
-            var partial = await db.CustomerAliasMappings.Include(m => m.CustomerMaster)
-                .Where(m => m.OriginalCustomerName.ToLower().Contains(lower)
-                          || (m.CleanedCustomerName != null && m.CleanedCustomerName.ToLower().Contains(lower)))
-                .FirstOrDefaultAsync();
-            if (partial != null)
+            var partials = cache.PartialMatch(lower, 1);
+            if (partials.Count > 0)
             {
-                results.Add(BuildResponse(inputName, partial, CalcScore(lower, partial.OriginalCustomerName.ToLower())));
+                var p = partials[0];
+                results.Add(BuildCachedResponse(inputName, p, CalcScore(lower, p.OriginalCustomerNameLower)));
                 continue;
             }
 
-            var master = await db.CustomerMasters
-                .Where(c => c.CanonicalCustomerName != null && c.CanonicalCustomerName.ToLower().Contains(lower))
-                .FirstOrDefaultAsync();
+            var master = cache.MasterFallback(lower);
             if (master != null)
             {
                 results.Add(new ResolveResponse
@@ -278,6 +268,19 @@ public class Query
         Country = match.CustomerMaster?.CountryOfOperation,
         Region = match.CustomerMaster?.Region,
         Mgs = match.CustomerMaster?.Mgs,
+    };
+
+    private static ResolveResponse BuildCachedResponse(string inputName, CachedMapping match, double confidence) => new()
+    {
+        CustomerName = inputName, CommonName = match.CleanedCustomerName,
+        IsResolved = true, ConfidenceScore = confidence,
+        MatchedAlias = match.OriginalCustomerName,
+        CanonicalCustomerId = match.CanonicalCustomerId,
+        CanonicalCustomerName = match.Master?.CanonicalCustomerName,
+        CisCode = match.Master?.CisCode,
+        Country = match.Master?.CountryOfOperation,
+        Region = match.Master?.Region,
+        Mgs = match.Master?.Mgs,
     };
 
     private static double CalcScore(string a, string b)
