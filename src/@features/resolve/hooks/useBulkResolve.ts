@@ -5,7 +5,7 @@ import type { BulkResultRow, LoadedCustomer, ResolveResponse } from '../types';
 
 const CHUNK_SIZE = 5000;
 
-const mapBulkResult = (r: Partial<ResolveResponse>, id: number, name: string): BulkResultRow => ({
+export const mapBulkResult = (r: Partial<ResolveResponse>, id: number, name: string): BulkResultRow => ({
   id,
   originalName: name,
   cleanedName: r.commonName || null,

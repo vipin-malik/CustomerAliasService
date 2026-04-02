@@ -1,4 +1,7 @@
-import { useState, Fragment, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import type { ColDef, ICellRendererParams, RowClickedEvent } from 'ag-grid-community';
+import { themeQuartz } from 'ag-grid-community';
 import {
   Box,
   Paper,
@@ -12,14 +15,6 @@ import {
   DialogContent,
   DialogActions,
   IconButton,
-  Collapse,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TablePagination,
   Fade,
   CircularProgress,
 } from '@mui/material';
@@ -29,14 +24,24 @@ import {
   Delete,
   Refresh,
   CloudUpload,
-  ChevronRight,
-  ExpandMore,
   Description,
   Download,
 } from '@mui/icons-material';
 import { useMappings, useMappingMutations } from './hooks';
 import type { CustomerMasterWithAliases, MappingFormState, EditMasterFormState, AliasMapping } from './types';
 import styles from './MappingsPage.module.css';
+
+const darkTheme = themeQuartz.withParams({
+  backgroundColor: '#1c1532',
+  foregroundColor: '#e2e8f0',
+  headerBackgroundColor: '#261e40',
+  headerForegroundColor: '#94a3b8',
+  borderColor: 'rgba(82, 69, 119, 0.3)',
+  rowHoverColor: 'rgba(168, 85, 247, 0.08)',
+  selectedRowBackgroundColor: 'rgba(168, 85, 247, 0.12)',
+  accentColor: '#a855f7',
+  chromeBackgroundColor: '#1c1532',
+});
 
 const initialForm: MappingFormState = {
   originalCustomerName: '',
@@ -58,22 +63,6 @@ const initialEditForm: EditMasterFormState = {
   region: '',
 };
 
-const headerCellSx = {
-  fontWeight: 600,
-  fontSize: '0.7rem',
-  textTransform: 'uppercase',
-  color: 'text.secondary',
-  letterSpacing: '0.05em',
-} as const;
-
-const childHeaderCellSx = {
-  fontWeight: 600,
-  fontSize: '0.65rem',
-  textTransform: 'uppercase',
-  color: 'text.secondary',
-  py: 0.5,
-} as const;
-
 const MappingsPage = () => {
   const {
     masters,
@@ -88,7 +77,10 @@ const MappingsPage = () => {
     setSearch,
   } = useMappings();
 
-  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const masterGridRef = useRef<AgGridReact<CustomerMasterWithAliases>>(null);
+
+  // Selected master for detail panel
+  const [selectedMaster, setSelectedMaster] = useState<CustomerMasterWithAliases | null>(null);
 
   // Create dialog
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -148,8 +140,7 @@ const MappingsPage = () => {
     setDialogOpen(true);
   };
 
-  const openEdit = (master: CustomerMasterWithAliases, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const openEdit = (master: CustomerMasterWithAliases) => {
     setEditForm({
       canonicalCustomerId: master.canonicalCustomerId,
       canonicalCustomerName: master.canonicalCustomerName || '',
@@ -165,27 +156,190 @@ const MappingsPage = () => {
     updateMaster(editForm);
   };
 
-  const toggleExpand = (id: number) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const expandAll = () => setExpandedIds(new Set(masters.map((m) => m.canonicalCustomerId)));
-  const collapseAll = () => setExpandedIds(new Set());
-
   const totalAliases = masters.reduce((sum, m) => sum + (m.aliasMappings?.length || 0), 0);
 
-  // ---- Export to Excel (server-side CSV generation) ----
+  // Export to Excel (server-side CSV generation)
   const handleExport = useCallback(() => {
     const a = document.createElement('a');
     a.href = '/api/v1/export-mappings';
     a.download = 'customer-alias-mappings.csv';
     a.click();
   }, []);
+
+  // AG Grid column defs for master table
+  const masterColumnDefs = useMemo<ColDef<CustomerMasterWithAliases>[]>(
+    () => [
+      {
+        field: 'canonicalCustomerId',
+        headerName: 'ID',
+        width: 80,
+      },
+      {
+        field: 'canonicalCustomerName',
+        headerName: 'Canonical Customer Name',
+        flex: 1.5,
+        minWidth: 220,
+      },
+      {
+        field: 'cisCode',
+        headerName: 'CIS Code',
+        width: 110,
+        cellRenderer: (params: ICellRendererParams<CustomerMasterWithAliases>) =>
+          params.value || '-',
+      },
+      {
+        field: 'countryOfOperation',
+        headerName: 'Ctry Of Op',
+        width: 110,
+        cellRenderer: (params: ICellRendererParams<CustomerMasterWithAliases>) =>
+          params.value || '-',
+      },
+      {
+        field: 'mgs',
+        headerName: 'MGS',
+        width: 120,
+        cellRenderer: (params: ICellRendererParams<CustomerMasterWithAliases>) =>
+          params.value || '-',
+      },
+      {
+        field: 'region',
+        headerName: 'Region',
+        width: 110,
+        cellRenderer: (params: ICellRendererParams<CustomerMasterWithAliases>) =>
+          params.value || '-',
+      },
+      {
+        headerName: 'Aliases',
+        width: 90,
+        valueGetter: (params) => params.data?.aliasMappings?.length ?? 0,
+        cellRenderer: (params: ICellRendererParams<CustomerMasterWithAliases>) => {
+          const count = params.value ?? 0;
+          return (
+            <Chip
+              label={count}
+              size="small"
+              color={count > 0 ? 'primary' : 'default'}
+              variant="outlined"
+            />
+          );
+        },
+      },
+      {
+        headerName: '',
+        width: 60,
+        sortable: false,
+        filter: false,
+        cellRenderer: (params: ICellRendererParams<CustomerMasterWithAliases>) => {
+          if (!params.data) return null;
+          return (
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                openEdit(params.data!);
+              }}
+              title="Edit customer"
+              sx={{ color: 'text.secondary', '&:hover': { color: 'primary.300' } }}
+            >
+              <Edit sx={{ fontSize: 14 }} />
+            </IconButton>
+          );
+        },
+      },
+    ],
+    [],
+  );
+
+  // Alias detail column defs
+  const aliasColumnDefs = useMemo<ColDef<AliasMapping>[]>(
+    () => [
+      {
+        field: 'id',
+        headerName: 'ID',
+        width: 80,
+      },
+      {
+        field: 'originalCustomerName',
+        headerName: 'Original Customer Name',
+        flex: 1.5,
+        minWidth: 220,
+        cellRenderer: (params: ICellRendererParams<AliasMapping>) => {
+          if (!params.data) return null;
+          return (
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ height: '100%' }}>
+              <Description sx={{ fontSize: 12, color: 'text.secondary' }} />
+              <span>{params.value}</span>
+            </Stack>
+          );
+        },
+      },
+      {
+        field: 'cleanedCustomerName',
+        headerName: 'Cleaned Customer Name',
+        flex: 1.2,
+        minWidth: 180,
+        cellRenderer: (params: ICellRendererParams<AliasMapping>) =>
+          params.value || '-',
+      },
+      {
+        headerName: '',
+        width: 60,
+        sortable: false,
+        filter: false,
+        cellRenderer: (params: ICellRendererParams<AliasMapping>) => {
+          if (!params.data) return null;
+          return (
+            <IconButton
+              size="small"
+              title="Delete alias"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedItem(params.data!);
+                setDeleteDialogOpen(true);
+              }}
+              sx={{
+                color: 'text.secondary',
+                '&:hover': { color: 'error.main' },
+              }}
+            >
+              <Delete sx={{ fontSize: 13 }} />
+            </IconButton>
+          );
+        },
+      },
+    ],
+    [],
+  );
+
+  const handleRowClicked = useCallback(
+    (event: RowClickedEvent<CustomerMasterWithAliases>) => {
+      if (!event.data) return;
+      setSelectedMaster((prev) =>
+        prev?.canonicalCustomerId === event.data!.canonicalCustomerId ? null : event.data!,
+      );
+    },
+    [],
+  );
+
+  // Keep selected master in sync with data refreshes
+  const currentSelectedMaster = useMemo(() => {
+    if (!selectedMaster) return null;
+    return masters.find((m) => m.canonicalCustomerId === selectedMaster.canonicalCustomerId) ?? null;
+  }, [masters, selectedMaster]);
+
+  const selectedAliases = currentSelectedMaster?.aliasMappings ?? [];
+
+  const handlePageChange = useCallback(
+    (event: { newPage: number; newPageSize: number }) => {
+      if (event.newPageSize !== pageSize) {
+        setPageSize(event.newPageSize);
+        setPage(0);
+      } else if (event.newPage !== page) {
+        setPage(event.newPage);
+      }
+    },
+    [page, pageSize, setPage, setPageSize],
+  );
 
   return (
     <div className={styles.page}>
@@ -221,47 +375,6 @@ const MappingsPage = () => {
               }}
               sx={{ flex: 1, minWidth: 200 }}
             />
-
-            <Box
-              sx={{
-                display: 'flex',
-                bgcolor: 'background.default',
-                borderRadius: 1,
-                border: '1px solid',
-                borderColor: 'divider',
-                overflow: 'hidden',
-              }}
-            >
-              <IconButton
-                size="small"
-                onClick={expandAll}
-                title="Expand All"
-                sx={{
-                  borderRadius: 0,
-                  px: 1.2,
-                  py: 0.8,
-                  color: 'text.secondary',
-                  '&:hover': { bgcolor: 'primary.900', color: 'primary.300' },
-                }}
-              >
-                <ExpandMore sx={{ fontSize: 15 }} />
-              </IconButton>
-              <Box sx={{ width: '1px', bgcolor: 'divider' }} />
-              <IconButton
-                size="small"
-                onClick={collapseAll}
-                title="Collapse All"
-                sx={{
-                  borderRadius: 0,
-                  px: 1.2,
-                  py: 0.8,
-                  color: 'text.secondary',
-                  '&:hover': { bgcolor: 'primary.900', color: 'primary.300' },
-                }}
-              >
-                <ChevronRight sx={{ fontSize: 15 }} />
-              </IconButton>
-            </Box>
 
             <IconButton
               size="small"
@@ -311,7 +424,7 @@ const MappingsPage = () => {
           </Stack>
         </Box>
 
-        {/* Master-detail table */}
+        {/* Master AG Grid */}
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
             <CircularProgress size={32} />
@@ -321,200 +434,86 @@ const MappingsPage = () => {
             <Typography color="text.secondary">No mappings found</Typography>
           </Box>
         ) : (
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow sx={{ bgcolor: 'background.default' }}>
-                  <TableCell sx={{ width: 40 }} />
-                  <TableCell sx={{ ...headerCellSx, width: 80 }}>ID</TableCell>
-                  <TableCell sx={headerCellSx}>Canonical Customer Name</TableCell>
-                  <TableCell sx={headerCellSx}>CIS Code</TableCell>
-                  <TableCell sx={headerCellSx}>Ctry Of Op</TableCell>
-                  <TableCell sx={headerCellSx}>MGS</TableCell>
-                  <TableCell sx={headerCellSx}>Region</TableCell>
-                  <TableCell sx={{ ...headerCellSx, width: 70 }}>Aliases</TableCell>
-                  <TableCell sx={{ width: 50 }} />
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {masters.map((master) => {
-                  const isExpanded = expandedIds.has(master.canonicalCustomerId);
-                  const aliases = master.aliasMappings || [];
-                  return (
-                    <Fragment key={master.canonicalCustomerId}>
-                      <TableRow
-                        hover
-                        onClick={() => toggleExpand(master.canonicalCustomerId)}
-                        sx={{
-                          cursor: 'pointer',
-                          '& td': { borderBottom: isExpanded ? 'none' : undefined },
-                        }}
-                      >
-                        <TableCell sx={{ px: 1 }}>
-                          <IconButton size="small">
-                            {isExpanded ? (
-                              <ExpandMore sx={{ fontSize: 16 }} />
-                            ) : (
-                              <ChevronRight sx={{ fontSize: 16 }} />
-                            )}
-                          </IconButton>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight={500} color="text.primary">
-                            {master.canonicalCustomerId}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight={600} color="text.primary">
-                            {master.canonicalCustomerName}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary">
-                            {master.cisCode || '-'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary">
-                            {master.countryOfOperation || '-'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary">
-                            {master.mgs || '-'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary">
-                            {master.region || '-'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            label={aliases.length}
-                            size="small"
-                            color={aliases.length > 0 ? 'primary' : 'default'}
-                            variant="outlined"
-                          />
-                        </TableCell>
-                        <TableCell sx={{ px: 0.5 }}>
-                          <IconButton
-                            size="small"
-                            onClick={(e) => openEdit(master, e)}
-                            title="Edit customer"
-                            sx={{ color: 'text.secondary', '&:hover': { color: 'primary.300' } }}
-                          >
-                            <Edit sx={{ fontSize: 14 }} />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell
-                          colSpan={9}
-                          sx={{
-                            py: 0,
-                            px: 0,
-                            borderBottom: isExpanded ? '1px solid' : 'none',
-                            borderColor: 'divider',
-                          }}
-                        >
-                          <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                            <Box sx={{ mx: 4, my: 1.5, mb: 2 }}>
-                              {aliases.length === 0 ? (
-                                <Typography
-                                  variant="body2"
-                                  color="text.secondary"
-                                  sx={{ py: 1, fontStyle: 'italic' }}
-                                >
-                                  No alias mappings for this customer
-                                </Typography>
-                              ) : (
-                                <Table
-                                  size="small"
-                                  sx={{ bgcolor: 'rgba(168, 85, 247, 0.04)', borderRadius: 1 }}
-                                >
-                                  <TableHead>
-                                    <TableRow>
-                                      <TableCell sx={childHeaderCellSx}>ID</TableCell>
-                                      <TableCell sx={childHeaderCellSx}>
-                                        Original Customer Name
-                                      </TableCell>
-                                      <TableCell sx={childHeaderCellSx}>
-                                        Cleaned Customer Name
-                                      </TableCell>
-                                      <TableCell sx={{ width: 60, py: 0.5 }} />
-                                    </TableRow>
-                                  </TableHead>
-                                  <TableBody>
-                                    {aliases.map((alias) => (
-                                      <TableRow key={alias.id} hover>
-                                        <TableCell sx={{ py: 0.75 }}>
-                                          <Typography variant="caption" color="text.secondary">
-                                            {alias.id}
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell sx={{ py: 0.75 }}>
-                                          <Stack direction="row" spacing={1} alignItems="center">
-                                            <Description
-                                              sx={{ fontSize: 12, color: 'text.secondary' }}
-                                            />
-                                            <Typography variant="body2" color="text.primary">
-                                              {alias.originalCustomerName}
-                                            </Typography>
-                                          </Stack>
-                                        </TableCell>
-                                        <TableCell sx={{ py: 0.75 }}>
-                                          <Typography variant="body2" color="text.secondary">
-                                            {alias.cleanedCustomerName || '-'}
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell sx={{ py: 0.75 }}>
-                                          <IconButton
-                                            size="small"
-                                            title="Delete alias"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setSelectedItem(alias);
-                                              setDeleteDialogOpen(true);
-                                            }}
-                                            sx={{
-                                              color: 'text.secondary',
-                                              '&:hover': { color: 'error.main' },
-                                            }}
-                                          >
-                                            <Delete sx={{ fontSize: 13 }} />
-                                          </IconButton>
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              )}
-                            </Box>
-                          </Collapse>
-                        </TableCell>
-                      </TableRow>
-                    </Fragment>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
+          <div className={styles.gridContainer}>
+            <AgGridReact<CustomerMasterWithAliases>
+              ref={masterGridRef}
+              theme={darkTheme}
+              rowData={masters}
+              columnDefs={masterColumnDefs}
+              pagination
+              paginationPageSize={pageSize}
+              paginationPageSizeSelector={[10, 25, 50]}
+              suppressPaginationPanel={false}
+              onRowClicked={handleRowClicked}
+              getRowId={(params) => String(params.data.canonicalCustomerId)}
+              rowSelection="single"
+              suppressRowClickSelection
+            />
+          </div>
         )}
-
-        <TablePagination
-          component="div"
-          count={totalCount}
-          page={page}
-          onPageChange={(_, p) => setPage(p)}
-          rowsPerPage={pageSize}
-          onRowsPerPageChange={(e) => {
-            setPageSize(parseInt(e.target.value));
-            setPage(0);
-          }}
-          rowsPerPageOptions={[10, 25, 50]}
-        />
       </Paper>
+
+      {/* Detail Panel: Aliases for Selected Master */}
+      {currentSelectedMaster && (
+        <Fade in>
+          <Paper sx={{ p: 0 }}>
+            <Box
+              sx={{
+                p: 2,
+                borderBottom: '1px solid',
+                borderColor: 'divider',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <Typography variant="subtitle2" fontWeight={700} color="text.primary">
+                  Aliases for: {currentSelectedMaster.canonicalCustomerName}
+                </Typography>
+                <Chip
+                  label={`ID: ${currentSelectedMaster.canonicalCustomerId}`}
+                  size="small"
+                  variant="outlined"
+                />
+                <Chip
+                  label={`${selectedAliases.length} alias${selectedAliases.length !== 1 ? 'es' : ''}`}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                />
+              </Stack>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<Add sx={{ fontSize: 14 }} />}
+                onClick={() => openCreate(currentSelectedMaster)}
+                sx={{ textTransform: 'none', fontWeight: 600 }}
+              >
+                Add Alias
+              </Button>
+            </Box>
+
+            {selectedAliases.length === 0 ? (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                  No alias mappings for this customer
+                </Typography>
+              </Box>
+            ) : (
+              <div className={styles.detailGridContainer}>
+                <AgGridReact<AliasMapping>
+                  theme={darkTheme}
+                  rowData={selectedAliases}
+                  columnDefs={aliasColumnDefs}
+                  domLayout="autoHeight"
+                  getRowId={(params) => String(params.data.id)}
+                />
+              </div>
+            )}
+          </Paper>
+        </Fade>
+      )}
 
       {/* Create Alias Dialog */}
       <Dialog
