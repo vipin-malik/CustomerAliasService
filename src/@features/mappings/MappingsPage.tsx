@@ -28,6 +28,7 @@ import {
   Download,
 } from '@mui/icons-material';
 import { useMappings, useMappingMutations } from './hooks';
+import { useMappingsSession, useMappingsSessionField } from './store';
 import type { CustomerMasterWithAliases, MappingFormState, EditMasterFormState, AliasMapping } from './types';
 import styles from './MappingsPage.module.css';
 
@@ -79,8 +80,13 @@ const MappingsPage = () => {
 
   const masterGridRef = useRef<AgGridReact<CustomerMasterWithAliases>>(null);
 
-  // Selected master for detail panel
-  const [selectedMaster, setSelectedMaster] = useState<CustomerMasterWithAliases | null>(null);
+  // Selected master for detail panel — persist only the id; hydrate the object from the query.
+  const { selectedMasterId } = useMappingsSession();
+  const setMappingsField = useMappingsSessionField();
+  const setSelectedMasterId = useCallback(
+    (id: number | null) => setMappingsField('selectedMasterId', id),
+    [setMappingsField],
+  );
 
   // Create dialog
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -314,18 +320,17 @@ const MappingsPage = () => {
   const handleRowClicked = useCallback(
     (event: RowClickedEvent<CustomerMasterWithAliases>) => {
       if (!event.data) return;
-      setSelectedMaster((prev) =>
-        prev?.canonicalCustomerId === event.data!.canonicalCustomerId ? null : event.data!,
-      );
+      const clickedId = event.data.canonicalCustomerId;
+      setSelectedMasterId(selectedMasterId === clickedId ? null : clickedId);
     },
-    [],
+    [selectedMasterId, setSelectedMasterId],
   );
 
   // Keep selected master in sync with data refreshes
   const currentSelectedMaster = useMemo(() => {
-    if (!selectedMaster) return null;
-    return masters.find((m) => m.canonicalCustomerId === selectedMaster.canonicalCustomerId) ?? null;
-  }, [masters, selectedMaster]);
+    if (selectedMasterId == null) return null;
+    return masters.find((m) => m.canonicalCustomerId === selectedMasterId) ?? null;
+  }, [masters, selectedMasterId]);
 
   const selectedAliases = currentSelectedMaster?.aliasMappings ?? [];
 

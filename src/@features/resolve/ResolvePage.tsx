@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useRef, useCallback } from 'react';
 import { useLazyQuery, useMutation } from '@apollo/client';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, RowClassRules, ICellRendererParams } from 'ag-grid-community';
@@ -37,6 +37,7 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 
 import { useNotification } from '@core/context';
 import { useResolveAlias, useBulkResolve, useEditMapping } from './hooks';
+import { useResolveSession, useResolveSessionField } from './store';
 import { ConfidenceBadge } from './components/ConfidenceBadge';
 import { GET_INVESTORS, PUSH_TO_DB } from './graphql';
 import type { LoadedCustomer, BulkResultRow, ResolveResponse, CustomerMasterOption } from './types';
@@ -64,16 +65,24 @@ const darkTheme = themeQuartz.withParams({
 const ResolvePage = () => {
   const { showSuccess, showError } = useNotification();
 
-  // ---- Single resolution ----
-  const [singleName, setSingleName] = useState('');
-  const { resolveOne, singleResult, singleLoading, setSingleResult } = useResolveAlias();
+  const { singleName, loadedCustomers, dbSearch, activeStep, showBulkInput, bulkText } =
+    useResolveSession();
+  const setField = useResolveSessionField();
+  const setSingleName = useCallback((v: string) => setField('singleName', v), [setField]);
+  const setLoadedCustomers = useCallback(
+    (v: LoadedCustomer[]) => setField('loadedCustomers', v),
+    [setField],
+  );
+  const setDbSearch = useCallback((v: string) => setField('dbSearch', v), [setField]);
+  const setActiveStep = useCallback((v: number) => setField('activeStep', v), [setField]);
+  const setShowBulkInput = useCallback(
+    (v: boolean | ((prev: boolean) => boolean)) => setField('showBulkInput', v),
+    [setField],
+  );
+  const setBulkText = useCallback((v: string) => setField('bulkText', v), [setField]);
 
-  // ---- Bulk state ----
-  const [loadedCustomers, setLoadedCustomers] = useState<LoadedCustomer[]>([]);
-  const [dbSearch, setDbSearch] = useState('');
-  const [activeStep, setActiveStep] = useState(0);
-  const [showBulkInput, setShowBulkInput] = useState(false);
-  const [bulkText, setBulkText] = useState('');
+  // ---- Single resolution ----
+  const { resolveOne, singleResult, singleLoading, setSingleResult } = useResolveAlias();
 
   const previewGridRef = useRef<AgGridReact<LoadedCustomer>>(null);
   const resultsGridRef = useRef<AgGridReact<BulkResultRow>>(null);
